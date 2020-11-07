@@ -111,6 +111,7 @@ name:
 #define IAREA		.L_IAREA_\name\()	/* PACA save area */
 #define IVIRT		.L_IVIRT_\name\()	/* Has virt mode entry point */
 #define IISIDE		.L_IISIDE_\name\()	/* Uses SRR0/1 not DAR/DSISR */
+#define ICFAR		.L_ICFAR_\name\()	/* Uses CFAR */
 #define IDAR		.L_IDAR_\name\()	/* Uses DAR (or SRR0) */
 #define IDSISR		.L_IDSISR_\name\()	/* Uses DSISR (or SRR1) */
 #define IBRANCH_TO_COMMON	.L_IBRANCH_TO_COMMON_\name\() /* ENTRY branch to common */
@@ -149,6 +150,9 @@ do_define_int n
 	.endif
 	.ifndef IISIDE
 		IISIDE=0
+	.endif
+	.ifndef ICFAR
+		ICFAR=0
 	.endif
 	.ifndef IDAR
 		IDAR=0
@@ -286,9 +290,12 @@ BEGIN_FTR_SECTION
 	mfspr	r9,SPRN_PPR
 END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
 	std	r10,IAREA+EX_R10(r13)		/* save r10 - r12 */
+	/* KVM wants CFAR even if the Linux handler doesn't */
+	.if ICFAR || (!\virt && IKVM_REAL) || (\virt && IKVM_VIRT)
 BEGIN_FTR_SECTION
 	mfspr	r10,SPRN_CFAR
 END_FTR_SECTION_IFSET(CPU_FTR_CFAR)
+	.endif
 	.if \ool
 	.if !\virt
 	b	tramp_real_\name
@@ -304,9 +311,11 @@ END_FTR_SECTION_IFSET(CPU_FTR_CFAR)
 BEGIN_FTR_SECTION
 	std	r9,IAREA+EX_PPR(r13)
 END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
+	.if ICFAR || (!\virt && IKVM_REAL) || (\virt && IKVM_VIRT)
 BEGIN_FTR_SECTION
 	std	r10,IAREA+EX_CFAR(r13)
 END_FTR_SECTION_IFSET(CPU_FTR_CFAR)
+	.endif
 	INTERRUPT_TO_KERNEL
 	mfctr	r10
 	std	r10,IAREA+EX_CTR(r13)
@@ -558,7 +567,11 @@ END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
 	.endif
 
 BEGIN_FTR_SECTION
+	.if ICFAR
 	ld	r10,IAREA+EX_CFAR(r13)
+	.else
+	li	r10,0
+	.endif
 	std	r10,ORIG_GPR3(r1)
 END_FTR_SECTION_IFSET(CPU_FTR_CFAR)
 	ld	r10,IAREA+EX_CTR(r13)
@@ -893,6 +906,7 @@ INT_DEFINE_BEGIN(system_reset)
 	IVIRT=0 /* no virt entry point */
 	ISTACK=0
 	IKVM_REAL=1
+	ICFAR=1
 INT_DEFINE_END(system_reset)
 
 EXC_REAL_BEGIN(system_reset, 0x100, 0x100)
@@ -1048,6 +1062,7 @@ INT_DEFINE_BEGIN(machine_check_early)
 	IDAR=1
 	IDSISR=1
 	IKUAP=0 /* We don't touch AMR here, we never go to virtual mode */
+	ICFAR=1
 INT_DEFINE_END(machine_check_early)
 
 INT_DEFINE_BEGIN(machine_check)
@@ -1057,6 +1072,7 @@ INT_DEFINE_BEGIN(machine_check)
 	IDAR=1
 	IDSISR=1
 	IKVM_REAL=1
+	ICFAR=1
 INT_DEFINE_END(machine_check)
 
 EXC_REAL_BEGIN(machine_check, 0x200, 0x100)
@@ -1319,6 +1335,7 @@ INT_DEFINE_BEGIN(data_access)
 	IDAR=1
 	IDSISR=1
 	IKVM_REAL=1
+	ICFAR=1
 INT_DEFINE_END(data_access)
 
 EXC_REAL_BEGIN(data_access, 0x300, 0x80)
@@ -1370,6 +1387,7 @@ INT_DEFINE_BEGIN(data_access_slb)
 	IVEC=0x380
 	IDAR=1
 	IKVM_REAL=1
+	ICFAR=1
 INT_DEFINE_END(data_access_slb)
 
 EXC_REAL_BEGIN(data_access_slb, 0x380, 0x80)
@@ -1415,6 +1433,7 @@ INT_DEFINE_BEGIN(instruction_access)
 #ifdef CONFIG_KVM_BOOK3S_PR_POSSIBLE
 	IKVM_REAL=1
 #endif
+	ICFAR=1
 INT_DEFINE_END(instruction_access)
 
 EXC_REAL_BEGIN(instruction_access, 0x400, 0x80)
@@ -1450,6 +1469,7 @@ INT_DEFINE_BEGIN(instruction_access_slb)
 #ifdef CONFIG_KVM_BOOK3S_PR_POSSIBLE
 	IKVM_REAL=1
 #endif
+	ICFAR=1
 INT_DEFINE_END(instruction_access_slb)
 
 EXC_REAL_BEGIN(instruction_access_slb, 0x480, 0x80)
@@ -1537,6 +1557,7 @@ INT_DEFINE_BEGIN(alignment)
 #ifdef CONFIG_KVM_BOOK3S_PR_POSSIBLE
 	IKVM_REAL=1
 #endif
+	ICFAR=1
 INT_DEFINE_END(alignment)
 
 EXC_REAL_BEGIN(alignment, 0x600, 0x100)
@@ -1567,6 +1588,7 @@ INT_DEFINE_BEGIN(program_check)
 #ifdef CONFIG_KVM_BOOK3S_PR_POSSIBLE
 	IKVM_REAL=1
 #endif
+	ICFAR=1
 INT_DEFINE_END(program_check)
 
 EXC_REAL_BEGIN(program_check, 0x700, 0x100)
@@ -1674,6 +1696,7 @@ INT_DEFINE_BEGIN(fp_unavailable)
 #ifdef CONFIG_KVM_BOOK3S_PR_POSSIBLE
 	IKVM_REAL=1
 #endif
+	ICFAR=1
 INT_DEFINE_END(fp_unavailable)
 
 EXC_REAL_BEGIN(fp_unavailable, 0x800, 0x100)
@@ -1978,6 +2001,7 @@ INT_DEFINE_BEGIN(single_step)
 #ifdef CONFIG_KVM_BOOK3S_PR_POSSIBLE
 	IKVM_REAL=1
 #endif
+	ICFAR=1
 INT_DEFINE_END(single_step)
 
 EXC_REAL_BEGIN(single_step, 0xd00, 0x100)
@@ -2064,6 +2088,7 @@ INT_DEFINE_BEGIN(emulation_assist)
 	IHSRR=1
 	IKVM_REAL=1
 	IKVM_VIRT=1
+	ICFAR=1
 INT_DEFINE_END(emulation_assist)
 
 EXC_REAL_BEGIN(emulation_assist, 0xe40, 0x20)
@@ -2111,6 +2136,7 @@ INT_DEFINE_BEGIN(hmi_exception_early)
 	ISTACK=0
 	IKUAP=0 /* We don't touch AMR here, we never go to virtual mode */
 	IKVM_REAL=1
+	ICFAR=1
 INT_DEFINE_END(hmi_exception_early)
 
 INT_DEFINE_BEGIN(hmi_exception)
@@ -2118,6 +2144,7 @@ INT_DEFINE_BEGIN(hmi_exception)
 	IHSRR=1
 	IMASK=IRQS_DISABLED
 	IKVM_REAL=1
+	ICFAR=1
 INT_DEFINE_END(hmi_exception)
 
 EXC_REAL_BEGIN(hmi_exception, 0xe60, 0x20)
@@ -2267,6 +2294,7 @@ INT_DEFINE_BEGIN(altivec_unavailable)
 #ifdef CONFIG_KVM_BOOK3S_PR_POSSIBLE
 	IKVM_REAL=1
 #endif
+	ICFAR=1
 INT_DEFINE_END(altivec_unavailable)
 
 EXC_REAL_BEGIN(altivec_unavailable, 0xf20, 0x20)
@@ -2316,6 +2344,7 @@ INT_DEFINE_BEGIN(vsx_unavailable)
 #ifdef CONFIG_KVM_BOOK3S_PR_POSSIBLE
 	IKVM_REAL=1
 #endif
+	ICFAR=1
 INT_DEFINE_END(vsx_unavailable)
 
 EXC_REAL_BEGIN(vsx_unavailable, 0xf40, 0x20)
@@ -2365,6 +2394,7 @@ INT_DEFINE_BEGIN(facility_unavailable)
 #ifdef CONFIG_KVM_BOOK3S_PR_POSSIBLE
 	IKVM_REAL=1
 #endif
+	ICFAR=1
 INT_DEFINE_END(facility_unavailable)
 
 EXC_REAL_BEGIN(facility_unavailable, 0xf60, 0x20)
@@ -2393,6 +2423,7 @@ INT_DEFINE_BEGIN(h_facility_unavailable)
 	IHSRR=1
 	IKVM_REAL=1
 	IKVM_VIRT=1
+	ICFAR=1
 INT_DEFINE_END(h_facility_unavailable)
 
 EXC_REAL_BEGIN(h_facility_unavailable, 0xf80, 0x20)
