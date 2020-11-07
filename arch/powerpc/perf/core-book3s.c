@@ -1344,7 +1344,7 @@ static void power_pmu_disable(struct pmu *pmu)
 }
 
 /*
- * Re-enable all events if disable == 0.
+ * Re-enable all events if disable == 1.
  * If we were previously disabled and events were added, then
  * put the new config on the PMU.
  */
@@ -2387,6 +2387,17 @@ static void perf_event_interrupt(struct pt_regs *regs)
 
 	__perf_event_interrupt(regs);
 	perf_sample_event_took(sched_clock() - start_clock);
+}
+
+bool power_pmu_running(void)
+{
+	struct cpu_hw_events *cpuhw;
+
+	if (!ppmu)
+		return false;
+
+	cpuhw = this_cpu_ptr(&cpu_hw_events);
+	return cpuhw->n_events;
 }
 
 static int power_pmu_prepare_cpu(unsigned int cpu)
