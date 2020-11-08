@@ -250,6 +250,12 @@ static void watchdog_timer_interrupt(int cpu)
 		watchdog_smp_panic(cpu, tb);
 }
 
+bool nmi_watchdog_enabled_cpu(void)
+{
+	int cpu = raw_smp_processor_id();
+	return cpumask_test_cpu(cpu, &wd_cpus_enabled);
+}
+
 DEFINE_INTERRUPT_HANDLER_NMI(soft_nmi_interrupt)
 {
 	unsigned long flags;

@@ -4,9 +4,10 @@
 
 #ifdef CONFIG_PPC_WATCHDOG
 extern void arch_touch_nmi_watchdog(void);
-long soft_nmi_interrupt(struct pt_regs *regs);
+bool nmi_watchdog_enabled_cpu(void);
 #else
 static inline void arch_touch_nmi_watchdog(void) {}
+static inline bool nmi_watchdog_enabled_cpu(void) { return false; }
 #endif
 
 #if defined(CONFIG_NMI_IPI) && defined(CONFIG_STACKTRACE)

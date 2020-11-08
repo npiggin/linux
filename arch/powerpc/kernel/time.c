@@ -59,6 +59,7 @@
 
 #include <asm/interrupt.h>
 #include <asm/io.h>
+#include <asm/nmi.h>
 #include <asm/nvram.h>
 #include <asm/cache.h>
 #include <asm/machdep.h>
@@ -570,13 +571,15 @@ DEFINE_INTERRUPT_HANDLER_ASYNC(timer_interrupt)
 	/* Conditionally hard-enable interrupts. */
 	if (may_hard_irq_enable()) {
 		/* Ensure a positive value is written to the decrementer, or
-		 * else some CPUs will continue to take decrementer exceptions.
+		 * else some CPUs will take decrementer exceptions as soon
+		 * as MSR[EE]=1.
+		 *
 		 * When the PPC_WATCHDOG (decrementer based) is configured,
 		 * keep this at most 31 bits, which is about 4 seconds on most
 		 * systems, which gives the watchdog a chance of catching timer
 		 * interrupt hard lockups.
 		 */
-		if (IS_ENABLED(CONFIG_PPC_WATCHDOG))
+		if (nmi_watchdog_enabled_cpu())
 			set_dec(0x7fffffff);
 		else
 			set_dec(decrementer_max);
