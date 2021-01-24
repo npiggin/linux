@@ -1431,6 +1431,8 @@ static int kvmppc_handle_exit_hv(struct kvm_vcpu *vcpu,
 	 */
 	case BOOK3S_INTERRUPT_H_DATA_STORAGE:
 		r = RESUME_PAGE_FAULT;
+		if (vcpu->arch.fault_dsisr == HDSISR_CANARY)
+			r = RESUME_GUEST; /* Just retry if it's the canary */
 		break;
 	case BOOK3S_INTERRUPT_H_INST_STORAGE:
 		vcpu->arch.fault_dar = kvmppc_get_pc(vcpu);
@@ -3690,6 +3692,8 @@ static int kvmhv_p9_guest_entry(struct kvm_vcpu *vcpu, u64 time_limit,
 	u64 tb, next_timer;
 	int trap, save_pmu;
 
+	WARN_ON_ONCE(vcpu->arch.ceded);
+
 	tb = mftb();
 	next_timer = timer_get_next_tb();
 	if (tb >= next_timer)
@@ -3697,8 +3701,6 @@ static int kvmhv_p9_guest_entry(struct kvm_vcpu *vcpu, u64 time_limit,
 	local_paca->kvm_hstate.dec_expires = next_timer;
 	if (next_timer < time_limit)
 		time_limit = next_timer;
-
-	vcpu->arch.ceded = 0;
 
 	kvmhv_save_host_pmu();		/* saves it to PACA kvm_hstate */
 
@@ -3826,9 +3828,10 @@ static int kvmhv_p9_guest_entry(struct kvm_vcpu *vcpu, u64 time_limit,
 			}
 		}
 		kvmppc_xive_pull_vcpu(vcpu);
+
+		vcpu->arch.slb_max = 0;
 	}
 
-	vcpu->arch.slb_max = 0;
 	dec = mfspr(SPRN_DEC);
 	if (!(lpcr & LPCR_LD)) /* Sign extend if not using large decrementer */
 		dec = (s32) dec;
