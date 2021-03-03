@@ -848,8 +848,10 @@ int kvmhv_vcpu_entry_p9(struct kvm_vcpu *vcpu, u64 time_limit, unsigned long lpc
 
 	if (kvm_is_radix(kvm)) {
 		switch_mmu_to_guest_radix(kvm, vcpu, lpcr);
+#if 0
 		if (!cpu_has_feature(CPU_FTR_P9_RADIX_PREFETCH_BUG))
 			__mtmsrd(0, 1); /* clear RI */
+#endif
 
 	} else {
 		switch_mmu_to_guest_hpt(kvm, vcpu, lpcr);
@@ -907,6 +909,7 @@ tm_return_to_guest:
 	vcpu->arch.regs.gpr[1] = local_paca->kvm_hstate.scratch1;
 	vcpu->arch.regs.gpr[3] = local_paca->kvm_hstate.scratch2;
 
+#if 0
 	/*
 	 * Only set RI after reading machine check regs (DAR, DSISR, SRR0/1)
 	 * and hstate scratch (which we need to move into exsave to make
@@ -921,6 +924,7 @@ tm_return_to_guest:
 		WARN_ON_ONCE(mfmsr() & MSR_RI);
 		__mtmsrd(MSR_RI, 1);
 	}
+#endif
 
 	vcpu->arch.regs.gpr[9] = exsave[EX_R9/sizeof(u64)];
 	vcpu->arch.regs.gpr[10] = exsave[EX_R10/sizeof(u64)];
