@@ -718,8 +718,8 @@ int kvmhv_vcpu_entry_p9(struct kvm_vcpu *vcpu, u64 time_limit, unsigned long lpc
 
 	if (kvm_is_radix(kvm)) {
 		switch_mmu_to_guest_radix(kvm, vcpu, lpcr);
-		if (!cpu_has_feature(CPU_FTR_P9_RADIX_PREFETCH_BUG))
-			__mtmsrd(0, 1); /* clear RI */
+//		if (!cpu_has_feature(CPU_FTR_P9_RADIX_PREFETCH_BUG))
+//			__mtmsrd(0, 1); /* clear RI */
 
 	} else {
 		switch_mmu_to_guest_hpt(kvm, vcpu, lpcr);
@@ -782,12 +782,12 @@ int kvmhv_vcpu_entry_p9(struct kvm_vcpu *vcpu, u64 time_limit, unsigned long lpc
 #if 0
 	if (ri_set) {
 		if (unlikely(!(mfmsr() & MSR_RI))) {
-			__mtmsrd(MSR_RI, 1);
+//			__mtmsrd(MSR_RI, 1);
 			WARN_ON_ONCE(1);
 		}
 	} else {
 		WARN_ON_ONCE(mfmsr() & MSR_RI);
-		__mtmsrd(MSR_RI, 1);
+//		__mtmsrd(MSR_RI, 1);
 	}
 #endif
 
