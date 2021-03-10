@@ -103,7 +103,7 @@ END_FTR_SECTION(0, 1);						\
 #endif
 
 _GLOBAL_TOC(plpar_hcall_norets_notrace)
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 
 	mfcr	r0
 	stw	r0,8(r1)
@@ -117,7 +117,7 @@ _GLOBAL_TOC(plpar_hcall_norets_notrace)
 	blr				/* return r3 = status */
 
 _GLOBAL_TOC(plpar_hcall_norets)
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 
 	mfcr	r0
 	stw	r0,8(r1)
@@ -146,7 +146,7 @@ plpar_hcall_norets_trace:
 #endif
 
 _GLOBAL_TOC(plpar_hcall)
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 
 	mfcr	r0
 	stw	r0,8(r1)
@@ -218,7 +218,7 @@ plpar_hcall_trace:
  * since these variables may not be present in the RMO region.
  */
 _GLOBAL(plpar_hcall_raw)
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 
 	mfcr	r0
 	stw	r0,8(r1)
@@ -249,7 +249,7 @@ _GLOBAL(plpar_hcall_raw)
 	blr				/* return r3 = status */
 
 _GLOBAL_TOC(plpar_hcall9)
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 
 	mfcr	r0
 	stw	r0,8(r1)
@@ -334,7 +334,7 @@ plpar_hcall9_trace:
 
 /* See plpar_hcall_raw to see why this is needed */
 _GLOBAL(plpar_hcall9_raw)
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 
 	mfcr	r0
 	stw	r0,8(r1)

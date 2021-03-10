@@ -150,6 +150,8 @@ static inline void interrupt_enter_prepare(struct pt_regs *regs, struct interrup
 #ifdef CONFIG_PPC64
 	bool trace_enable = false;
 
+	if (unlikely(regs->ppr != DEFAULT_PPR))
+		mtspr(SPRN_PPR, DEFAULT_PPR);
 	if (IS_ENABLED(CONFIG_TRACE_IRQFLAGS)) {
 		if (irq_soft_mask_set_return(IRQS_DISABLED) == IRQS_ENABLED)
 			trace_enable = true;

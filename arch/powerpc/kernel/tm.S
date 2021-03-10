@@ -207,7 +207,7 @@ _GLOBAL(tm_reclaim)
 
 	/* Store the PPR in r11 and reset to decent value */
 	mfspr	r11, SPRN_PPR
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 
 	/* Now get some more GPRS free */
 	std	r7, GPR7(r1)			/* Temporary stash */
@@ -515,7 +515,7 @@ restore_gprs:
 	/* Commit register state as checkpointed state: */
 	TRECHKPT
 
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 
 	/*
 	 * Our transactional state has now changed.

@@ -85,6 +85,11 @@ notrace long system_call_exception(long r3, long r4, long r5,
 
 	regs->orig_gpr3 = r3;
 
+#ifdef CONFIG_PPC_BOOK3S_64
+	if (unlikely(regs->ppr != DEFAULT_PPR))
+		mtspr(SPRN_PPR, DEFAULT_PPR);
+#endif
+
 	if (IS_ENABLED(CONFIG_PPC_IRQ_SOFT_MASK_DEBUG))
 		BUG_ON(irq_soft_mask_return() != IRQS_ALL_DISABLED);
 
@@ -362,6 +367,11 @@ again:
 
 	account_cpu_user_exit();
 
+#ifdef CONFIG_PPC_BOOK3S_64
+	if (unlikely(regs->ppr != DEFAULT_PPR))
+		mtspr(SPRN_PPR, regs->ppr);
+#endif
+
 	/* Restore user access locks last */
 	kuap_user_restore(regs);
 	kuep_unlock();
@@ -444,6 +454,8 @@ notrace unsigned long syscall_exit_restart(unsigned long r3, struct pt_regs *reg
 
 #ifdef CONFIG_PPC_BOOK3S_64
 	set_kuap(AMR_KUAP_BLOCKED);
+	if (unlikely(regs->ppr != DEFAULT_PPR))
+		mtspr(SPRN_PPR, DEFAULT_PPR);
 #endif
 
 	trace_hardirqs_off();
@@ -478,6 +490,10 @@ notrace unsigned long interrupt_exit_user_prepare(struct pt_regs *regs)
 
 	ret = interrupt_exit_user_prepare_main(0, regs);
 
+#ifdef CONFIG_PPC_BOOK3S_64
+	if (unlikely(regs->ppr != DEFAULT_PPR))
+		mtspr(SPRN_PPR, regs->ppr);
+#endif
 #ifdef CONFIG_PPC64
 	regs->exit_result = ret;
 #endif
@@ -579,6 +595,11 @@ again:
 	local_paca->tm_scratch = regs->msr;
 #endif
 
+#ifdef CONFIG_PPC_BOOK3S_64
+	if (unlikely(regs->ppr != DEFAULT_PPR))
+		mtspr(SPRN_PPR, regs->ppr);
+#endif
+
 	/*
 	 * 64s does not want to mfspr(SPRN_AMR) here, because this comes after
 	 * mtmsr, which would cause Read-After-Write stalls. Hence, take the
@@ -597,6 +618,8 @@ notrace unsigned long interrupt_exit_user_restart(struct pt_regs *regs)
 
 #ifdef CONFIG_PPC_BOOK3S_64
 	set_kuap(AMR_KUAP_BLOCKED);
+	if (unlikely(regs->ppr != DEFAULT_PPR))
+		mtspr(SPRN_PPR, DEFAULT_PPR);
 #endif
 
 	trace_hardirqs_off();
@@ -620,6 +643,9 @@ notrace unsigned long interrupt_exit_kernel_restart(struct pt_regs *regs)
 	local_paca->irq_happened |= PACA_IRQ_HARD_DIS;
 
 #ifdef CONFIG_PPC_BOOK3S_64
+	if (unlikely(regs->ppr != DEFAULT_PPR))
+		mtspr(SPRN_PPR, DEFAULT_PPR);
+
 	set_kuap(AMR_KUAP_BLOCKED);
 #endif
 

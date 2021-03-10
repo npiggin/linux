@@ -98,7 +98,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_P9_TM_HV_ASSIST)
 	/* Save away PPR soon so we don't run with user value. */
 	std	r0, VCPU_GPRS_TM(0)(r9)
 	mfspr	r0, SPRN_PPR
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 
 	/* Reload stack pointer. */
 	std	r1, VCPU_GPRS_TM(1)(r9)
@@ -341,7 +341,7 @@ _GLOBAL(__kvmppc_restore_tm)
 	TRECHKPT
 
 	/* Now let's get back the state we need. */
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 	GET_PACA(r13)
 	ld	r1, HSTATE_SCRATCH2(r13)
 	REST_GPR(7, r1)

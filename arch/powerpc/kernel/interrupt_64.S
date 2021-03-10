@@ -98,10 +98,6 @@ END_FTR_SECTION_IFSET(CPU_FTR_TM)
 	ld	r11,exception_marker@toc(r2)
 	std	r11,-16(r10)		/* "regshere" marker */
 
-BEGIN_FTR_SECTION
-	HMT_MEDIUM
-END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
-
 	/*
 	 * scv enters with MSR[EE]=1 and is immediately considered soft-masked.
 	 * The entry vector already sets PACAIRQSOFTMASK to IRQS_ALL_DISABLED,
@@ -136,10 +132,6 @@ END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
 BEGIN_FTR_SECTION
 	stdcx.	r0,0,r1			/* to clear the reservation */
 END_FTR_SECTION_IFCLR(CPU_FTR_STCX_CHECKS_ADDRESS)
-
-BEGIN_FTR_SECTION
-	HMT_MEDIUM_LOW
-END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
 
 	cmpdi	r3,0
 	bne	.Lsyscall_vectored_\name\()_restore_regs
@@ -377,10 +369,6 @@ END_FTR_SECTION_IFCLR(CPU_FTR_STCX_CHECKS_ADDRESS)
 	mtctr	r0
 	mtspr	SPRN_XER,r0
 .Lsyscall_restore_regs_cont:
-
-BEGIN_FTR_SECTION
-	HMT_MEDIUM_LOW
-END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
 
 	/*
 	 * We don't need to restore AMR on the way back to userspace for KUAP.

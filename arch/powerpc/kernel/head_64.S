@@ -803,7 +803,7 @@ _GLOBAL(pmac_secondary_start)
 	.globl	__secondary_start
 __secondary_start:
 	/* Set thread priority to MEDIUM */
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 
 	/*
 	 * Do early setup for this CPU, in particular initialising the MMU so we

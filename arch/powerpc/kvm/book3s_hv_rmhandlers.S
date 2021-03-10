@@ -375,7 +375,7 @@ kvm_no_guest:
 	lbz	r3, HSTATE_HWTHREAD_REQ(r13)
 	cmpwi	r3, 0
 	bne	53f
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 	li	r0, KVM_HWTHREAD_IN_KERNEL
 	stb	r0, HSTATE_HWTHREAD_STATE(r13)
 	/* need to recheck hwthread_req after a barrier, to avoid race */
@@ -414,9 +414,9 @@ kvm_no_guest:
 	lbz	r0, KVM_SPLIT_DO_NAP(r3)
 	cmpwi	r0, 0
 	beq	kvm_no_guest
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 	b	kvm_unsplit_nap
-60:	HMT_MEDIUM
+60:	HMT_MEDIUM_LOW
 	b	kvm_secondary_got_guest
 
 54:	li	r0, KVM_HWTHREAD_IN_KVM
@@ -800,7 +800,7 @@ END_FTR_SECTION_IFCLR(CPU_FTR_ARCH_207S)
 	lbz	r0, VCORE_IN_GUEST(r5)
 	cmpwi	r0, 0
 	beq	20b
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 21:
 	/* Set LPCR. */
 	ld	r8,VCORE_LPCR(r5)
@@ -945,7 +945,7 @@ secondary_too_late:
 11:	b	kvmhv_switch_to_host
 
 no_switch_exit:
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 	li	r12, 0
 	b	12f
 hdec_soon:
@@ -1412,7 +1412,7 @@ kvmhv_switch_to_host:
 13:	lbz	r3,VCORE_IN_GUEST(r5)
 	cmpwi	r3,0
 	bne	13b
-	HMT_MEDIUM
+	HMT_MEDIUM_LOW
 	b	16f
 
 	/* Primary thread waits for all the secondaries to exit guest */
