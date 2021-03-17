@@ -29,6 +29,7 @@
 #define __KVM_HAVE_IRQCHIP
 #define __KVM_HAVE_IRQ_LINE
 #define __KVM_HAVE_GUEST_DEBUG
+#define __KVM_HAVE_READONLY_MEM
 
 /* Not always available, but if it is, this is the correct offset.  */
 #define KVM_COALESCED_MMIO_PAGE_OFFSET 1

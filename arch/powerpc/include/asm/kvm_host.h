@@ -866,4 +866,13 @@ static inline void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu) {}
 static inline void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu) {}
 static inline void kvm_arch_vcpu_block_finish(struct kvm_vcpu *vcpu) {}
 
+#ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
+#define __KVM_HAVE_ARCH_FLUSH_REMOTE_TLB
+static inline int kvm_arch_flush_remote_tlb(struct kvm *kvm)
+{
+	/* XXX: flush */
+	return -ENOTSUPP;
+}
+#endif
+
 #endif /* __POWERPC_KVM_HOST_H__ */
