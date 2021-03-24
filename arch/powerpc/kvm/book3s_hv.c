@@ -1760,7 +1760,7 @@ static int kvm_arch_vcpu_ioctl_set_sregs_hv(struct kvm_vcpu *vcpu,
 	j = 0;
 	for (i = 0; i < vcpu->arch.slb_nr; i++) {
 		if (sregs->u.s.ppc64.slb[i].slbe & SLB_ESID_V) {
-			vcpu->arch.slb[j].orige = sregs->u.s.ppc64.slb[i].slbe;
+			vcpu->arch.slb[j].orige = sregs->u.s.ppc64.slb[i].slbe | i;
 			vcpu->arch.slb[j].origv = sregs->u.s.ppc64.slb[i].slbv;
 			++j;
 		}

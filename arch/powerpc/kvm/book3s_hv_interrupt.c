@@ -139,8 +139,12 @@ static void switch_mmu_to_guest_hpt(struct kvm *kvm, struct kvm_vcpu *vcpu, u64 
 	mtspr(SPRN_LPCR, lpcr);
 	mtspr(SPRN_PID, vcpu->arch.pid);
 
-	for (i = 0; i < vcpu->arch.slb_max; i++)
+	for (i = 0; i < vcpu->arch.slb_max; i++) {
+		u64 slbev = vcpu->arch.slb[i].origv;
+		if (slbev & 0x130 == 0x100)
+			printk("strange guest slbev %llx (slbee %llx)\n", slbev, slbee);
 		__mtslb(vcpu->arch.slb[i].orige, vcpu->arch.slb[i].origv);
+	}
 
 	isync();
 
@@ -175,6 +179,7 @@ static void save_clear_host_mmu(struct kvm *kvm)
 		 */
 		mtslb(0, 0, 0);
 		slb_invalidate(6);
+		asm volatile("ptesync" ::: "memory");
 	}
 }
 
@@ -194,6 +199,8 @@ static void save_clear_guest_mmu(struct kvm *kvm, struct kvm_vcpu *vcpu)
 			u64 slbee, slbev;
 			mfslb(i, &slbee, &slbev);
 			if (slbee & SLB_ESID_V) {
+				if (slbev & 0x130 == 0x100)
+					printk("strange guest slbev %llx (slbee %llx)\n", slbev, slbee);
 				vcpu->arch.slb[nr].orige = slbee | i;
 				vcpu->arch.slb[nr].origv = slbev;
 				nr++;
@@ -202,6 +209,7 @@ static void save_clear_guest_mmu(struct kvm *kvm, struct kvm_vcpu *vcpu)
 		vcpu->arch.slb_max = nr;
 		mtslb(0, 0, 0);
 		slb_invalidate(6);
+		asm volatile("ptesync" ::: "memory");
 	}
 }
 
