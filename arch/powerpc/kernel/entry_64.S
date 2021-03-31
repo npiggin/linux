@@ -423,6 +423,7 @@ _GLOBAL(save_nvgprs)
 	ld	r11,_TRAP(r1)
 	andi.	r0,r11,1
 	beqlr-
+	trap
 	SAVE_NVGPRS(r1)
 	clrrdi	r0,r11,1
 	std	r0,_TRAP(r1)

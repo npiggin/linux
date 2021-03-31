@@ -417,14 +417,15 @@ exc_##n##_common:							    \
 	std	r6,_LINK(r1);						    \
 	std	r7,_CTR(r1);						    \
 	std	r8,_XER(r1);						    \
-	li	r3,(n)+1;		/* indicate partial regs in trap */ \
+	li	r3,(n);			/* regs.trap vector */		    \
 	std	r9,0(r1);		/* store stack frame back link */   \
 	std	r10,_CCR(r1);		/* store orig CR in stackframe */   \
 	std	r9,GPR1(r1);		/* store stack frame back link */   \
 	std	r11,SOFTE(r1);		/* and save it to stackframe */     \
 	std	r12,STACK_FRAME_OVERHEAD-16(r1); /* mark the frame */	    \
 	std	r3,_TRAP(r1);		/* set trap number		*/  \
-	std	r0,RESULT(r1);		/* clear regs->result */
+	std	r0,RESULT(r1);		/* clear regs->result */	    \
+	SAVE_NVGPRS(r1);
 
 #define EXCEPTION_COMMON(n) \
 	EXCEPTION_COMMON_LVL(n, SPRN_SPRG_GEN_SCRATCH, PACA_EXGEN)
@@ -1039,8 +1040,10 @@ alignment_more:
 _GLOBAL(ret_from_except)
 	ld	r11,_TRAP(r1)
 	andi.	r0,r11,1
-	bne	ret_from_except_lite
+	bne	1f
 	REST_NVGPRS(r1)
+	b	ret_from_except_lite
+1:	trap
 
 _GLOBAL(ret_from_except_lite)
 	/*
