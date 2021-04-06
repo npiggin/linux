@@ -432,10 +432,14 @@ static inline void slb_clear_invalidate_partition(void)
  */
 static void radix_clear_slb(void)
 {
+	u64 slbee, slbev;
 	int i;
 
-	for (i = 0; i < 4; i++)
-		clear_slb_entry(i);
+	for (i = 0; i < 4; i++) {
+		mfslb(i, &slbee, &slbev);
+		if (unlikely(slbee || slbev))
+			clear_slb_entry(i);
+	}
 }
 
 static void switch_mmu_to_guest_radix(struct kvm *kvm, struct kvm_vcpu *vcpu, u64 lpcr)
