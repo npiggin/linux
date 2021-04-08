@@ -3699,7 +3699,7 @@ static void load_spr_state(struct kvm_vcpu *vcpu,
 	 */
 
 	if (!(vcpu->arch.ctrl & 1))
-		mtspr(SPRN_CTRLT, mfspr(SPRN_CTRLF) & ~1);
+		mtspr(SPRN_CTRLT, 0);
 
 	if (vcpu->arch.hfscr & HFSCR_PM) {
 		mtspr(SPRN_PMC1, vcpu->arch.pmc[0]);
