@@ -10,6 +10,7 @@
 #include <linux/extable.h>
 #include <linux/moduleloader.h>
 #include <linux/module_signature.h>
+#include <linux/sort.h>
 #include <linux/trace_events.h>
 #include <linux/init.h>
 #include <linux/kallsyms.h>
@@ -2725,6 +2726,30 @@ static void layout_symtab(struct module *mod, struct load_info *info)
 	mod->init_layout.size = debug_align(mod->init_layout.size);
 }
 
+static int symtab_cmp_fn(const void *a, const void *b)
+{
+	unsigned long v_a = kallsyms_symbol_value((Elf_Sym *)a);
+	unsigned long v_b = kallsyms_symbol_value((Elf_Sym *)b);
+
+	if (v_a < v_b)
+		return -1;
+	if (v_a > v_b)
+		return 1;
+	return 0;
+}
+
+static void sort_symtab(const struct load_info *info)
+{
+	unsigned int nr_syms;
+	Elf_Sym *syms;
+	Elf_Shdr *symsec = &info->sechdrs[info->index.sym];
+
+	syms = (Elf_Sym *)symsec->sh_addr;
+	nr_syms = symsec->sh_size / sizeof(Elf_Sym);
+
+	sort(syms, nr_syms, sizeof(Elf_Sym), symtab_cmp_fn, NULL);
+}
+
 /*
  * We use the full symtab and strtab which layout_symtab arranged to
  * be appended to the init section.  Later we switch to the cut-down
@@ -2737,6 +2762,8 @@ static void add_kallsyms(struct module *mod, const struct load_info *info)
 	Elf_Sym *dst;
 	char *s;
 	Elf_Shdr *symsec = &info->sechdrs[info->index.sym];
+
+	sort_symtab(info);
 
 	/* Set up to point into init section. */
 	mod->kallsyms = mod->init_layout.base + info->mod_kallsyms_init_off;
