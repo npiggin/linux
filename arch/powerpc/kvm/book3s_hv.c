@@ -3717,7 +3717,8 @@ static int kvmhv_vcpu_entry_p9_nested(struct kvm_vcpu *vcpu, u64 time_limit, uns
 
 	hard_irq_disable();
 	if (lazy_irq_pending()) {
-		if (ppc_get_pmu_inuse()) {
+		if (0 && ppc_get_pmu_inuse()) {
+			// xxx don't need to do this now
 			mtspr(SPRN_MMCRA, host_os_sprs.mmcra);
 			mtspr(SPRN_MMCR0, host_os_sprs.mmcr0);
 			isync();
@@ -4391,9 +4392,6 @@ static int kvmppc_vcpu_run_hv(struct kvm_vcpu *vcpu)
 	struct kvm_run *run = vcpu->run;
 	int r;
 	int srcu_idx;
-	unsigned long ebb_regs[3] = {};	/* shut up GCC */
-	unsigned long user_tar = 0;
-	unsigned int user_vrsave;
 	struct kvm *kvm;
 	unsigned long msr;
 
@@ -4454,14 +4452,7 @@ static int kvmppc_vcpu_run_hv(struct kvm_vcpu *vcpu)
 
 	save_user_regs_kvm();
 
-	/* Save userspace EBB and other register values */
-	if (cpu_has_feature(CPU_FTR_ARCH_207S)) {
-		ebb_regs[0] = mfspr(SPRN_EBBHR);
-		ebb_regs[1] = mfspr(SPRN_EBBRR);
-		ebb_regs[2] = mfspr(SPRN_BESCR);
-		user_tar = mfspr(SPRN_TAR);
-	}
-	user_vrsave = mfspr(SPRN_VRSAVE);
+	kvmppc_save_current_sprs();
 
 	vcpu->arch.waitp = &vcpu->arch.vcore->wait;
 	vcpu->arch.pgdir = kvm->mm->pgd;
@@ -4502,18 +4493,28 @@ static int kvmppc_vcpu_run_hv(struct kvm_vcpu *vcpu)
 		}
 	} while (is_kvmppc_resume_guest(r));
 
-	/* Restore userspace EBB and other register values */
-	if (cpu_has_feature(CPU_FTR_ARCH_207S)) {
-		mtspr(SPRN_EBBHR, ebb_regs[0]);
-		mtspr(SPRN_EBBRR, ebb_regs[1]);
-		mtspr(SPRN_BESCR, ebb_regs[2]);
-		mtspr(SPRN_TAR, user_tar);
+#ifdef CONFIG_ALTIVEC
+	if (cpu_has_feature(CPU_FTR_ALTIVEC) &&
+	    vcpu->arch.vrsave != current->thread.vrsave)
+		mtspr(SPRN_VRSAVE, current->thread.vrsave);
+#endif
+	/* TIDR, DSCR already restored */
+	if (vcpu->arch.bescr != current->thread.bescr)
+		mtspr(SPRN_BESCR, current->thread.bescr);
+	if (vcpu->arch.ebbhr != current->thread.ebbhr)
+		mtspr(SPRN_EBBHR, current->thread.ebbhr);
+	if (vcpu->arch.ebbrr != current->thread.ebbrr)
+		mtspr(SPRN_EBBRR, current->thread.ebbrr);
+
+	if (vcpu->arch.fscr != current->thread.fscr)
 		mtspr(SPRN_FSCR, current->thread.fscr);
-	}
-	mtspr(SPRN_VRSAVE, user_vrsave);
+
+	if (vcpu->arch.tar != current->thread.tar)
+		mtspr(SPRN_TAR, current->thread.tar);
 
 	vcpu->arch.state = KVMPPC_VCPU_NOTREADY;
 	atomic_dec(&kvm->arch.vcpus_running);
+
 	return r;
 }
 
