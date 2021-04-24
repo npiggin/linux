@@ -3659,87 +3659,71 @@ struct p9_host_os_sprs {
 	unsigned long sdar;
 };
 
-static void save_p9_host_pmu(struct p9_host_os_sprs *host_os_sprs)
+static void load_spr_state(struct kvm_vcpu *vcpu,
+			   struct p9_host_os_sprs *host_os_sprs)
 {
-	bool do_isync = false;
-
-	if (!ppc_get_pmu_inuse())
-		return;
+	mtspr(SPRN_DSCR, vcpu->arch.dscr);
+	mtspr(SPRN_IAMR, vcpu->arch.iamr);
+	mtspr(SPRN_PSPB, vcpu->arch.pspb);
+	mtspr(SPRN_FSCR, vcpu->arch.fscr);
+	mtspr(SPRN_TAR, vcpu->arch.tar);
+	mtspr(SPRN_EBBHR, vcpu->arch.ebbhr);
+	mtspr(SPRN_EBBRR, vcpu->arch.ebbrr);
+	mtspr(SPRN_BESCR, vcpu->arch.bescr);
+	mtspr(SPRN_TIDR, vcpu->arch.tid);
+	mtspr(SPRN_AMR, vcpu->arch.amr);
+	mtspr(SPRN_UAMOR, vcpu->arch.uamor);
 
 	/*
-	 * It might be better to put PMU handling (at least for the
-	 * host) in the perf subsystem because it knows more about what
-	 * is being used.
+	 * DAR, DSISR, and for nested HV, SPRGs must be set with MSR[RI]
+	 * clear (or hstate set appropriately to catch those registers
+	 * being clobbered if we take a MCE or SRESET), so those are done
+	 * later.
 	 */
 
-	/* POWER9, POWER10 do not implement HPMC or SPMC */
+	if (!(vcpu->arch.ctrl & 1))
+		mtspr(SPRN_CTRLT, mfspr(SPRN_CTRLF) & ~1);
 
-	host_os_sprs->mmcr0 = mfspr(SPRN_MMCR0);
-	host_os_sprs->mmcra = mfspr(SPRN_MMCRA);
-
-	if (host_os_sprs->mmcr0 != MMCR0_FC) {
-		/* Freeze counters */
-		mtspr(SPRN_MMCR0, MMCR0_FC);
-		do_isync = true;
-	}
-	if (host_os_sprs->mmcra != 0) {
-		/* Clear MMCRA in order to disable SDAR updates */
-		mtspr(SPRN_MMCRA, 0);
-		do_isync = true;
-	}
-	if (do_isync)
-		isync();
-
-	host_os_sprs->pmc1 = mfspr(SPRN_PMC1);
-	host_os_sprs->pmc2 = mfspr(SPRN_PMC2);
-	host_os_sprs->pmc3 = mfspr(SPRN_PMC3);
-	host_os_sprs->pmc4 = mfspr(SPRN_PMC4);
-	host_os_sprs->pmc5 = mfspr(SPRN_PMC5);
-	host_os_sprs->pmc6 = mfspr(SPRN_PMC6);
-	host_os_sprs->mmcr1 = mfspr(SPRN_MMCR1);
-	host_os_sprs->mmcr2 = mfspr(SPRN_MMCR2);
-	host_os_sprs->sdar = mfspr(SPRN_SDAR);
-	host_os_sprs->siar = mfspr(SPRN_SIAR);
-	host_os_sprs->sier1 = mfspr(SPRN_SIER);
+	mtspr(SPRN_PMC1, vcpu->arch.pmc[0]);
+	mtspr(SPRN_PMC2, vcpu->arch.pmc[1]);
+	mtspr(SPRN_PMC3, vcpu->arch.pmc[2]);
+	mtspr(SPRN_PMC4, vcpu->arch.pmc[3]);
+	mtspr(SPRN_PMC5, vcpu->arch.pmc[4]);
+	mtspr(SPRN_PMC6, vcpu->arch.pmc[5]);
+	mtspr(SPRN_MMCR1, vcpu->arch.mmcr[1]);
+	mtspr(SPRN_MMCR2, vcpu->arch.mmcr[2]);
+	mtspr(SPRN_SDAR, vcpu->arch.sdar);
+	mtspr(SPRN_SIAR, vcpu->arch.siar);
+	mtspr(SPRN_SIER, vcpu->arch.sier[0]);
 
 	if (cpu_has_feature(CPU_FTR_ARCH_31)) {
-		host_os_sprs->mmcr3 = mfspr(SPRN_MMCR3);
-		host_os_sprs->sier2 = mfspr(SPRN_SIER2);
-		host_os_sprs->sier3 = mfspr(SPRN_SIER3);
-	}
-}
-
-static void load_p9_host_pmu(struct p9_host_os_sprs *host_os_sprs)
-{
-	if (!ppc_get_pmu_inuse())
-		return;
-
-	mtspr(SPRN_PMC1, host_os_sprs->pmc1);
-	mtspr(SPRN_PMC2, host_os_sprs->pmc2);
-	mtspr(SPRN_PMC3, host_os_sprs->pmc3);
-	mtspr(SPRN_PMC4, host_os_sprs->pmc4);
-	mtspr(SPRN_PMC5, host_os_sprs->pmc5);
-	mtspr(SPRN_PMC6, host_os_sprs->pmc6);
-	mtspr(SPRN_MMCR1, host_os_sprs->mmcr1);
-	mtspr(SPRN_MMCR2, host_os_sprs->mmcr2);
-	mtspr(SPRN_SDAR, host_os_sprs->sdar);
-	mtspr(SPRN_SIAR, host_os_sprs->siar);
-	mtspr(SPRN_SIER, host_os_sprs->sier1);
-
-	if (cpu_has_feature(CPU_FTR_ARCH_31)) {
-		mtspr(SPRN_MMCR3, host_os_sprs->mmcr3);
-		mtspr(SPRN_SIER2, host_os_sprs->sier2);
-		mtspr(SPRN_SIER3, host_os_sprs->sier3);
+		mtspr(SPRN_MMCR3, vcpu->arch.mmcr[4]);
+		mtspr(SPRN_SIER2, vcpu->arch.sier[1]);
+		mtspr(SPRN_SIER3, vcpu->arch.sier[2]);
 	}
 
 	/* Set MMCRA then MMCR0 last */
-	mtspr(SPRN_MMCRA, host_os_sprs->mmcra);
-	mtspr(SPRN_MMCR0, host_os_sprs->mmcr0);
-	isync();
+	mtspr(SPRN_MMCRA, vcpu->arch.mmcra);
+	mtspr(SPRN_MMCR0, vcpu->arch.mmcr[0]);
+	/* No isync necessary because we're starting counters */
 }
 
-static void save_p9_guest_pmu(struct kvm_vcpu *vcpu, bool save_pmu)
+static void store_spr_state(struct kvm_vcpu *vcpu, int save_pmu)
 {
+	vcpu->arch.ctrl = mfspr(SPRN_CTRLF);
+
+	vcpu->arch.iamr = mfspr(SPRN_IAMR);
+	vcpu->arch.pspb = mfspr(SPRN_PSPB);
+	vcpu->arch.fscr = mfspr(SPRN_FSCR);
+	vcpu->arch.tar = mfspr(SPRN_TAR);
+	vcpu->arch.ebbhr = mfspr(SPRN_EBBHR);
+	vcpu->arch.ebbrr = mfspr(SPRN_EBBRR);
+	vcpu->arch.bescr = mfspr(SPRN_BESCR);
+	vcpu->arch.tid = mfspr(SPRN_TIDR);
+	vcpu->arch.amr = mfspr(SPRN_AMR);
+	vcpu->arch.uamor = mfspr(SPRN_UAMOR);
+	vcpu->arch.dscr = mfspr(SPRN_DSCR);
+
 	if (save_pmu) {
 		bool do_isync = false;
 
@@ -3793,74 +3777,6 @@ static void save_p9_guest_pmu(struct kvm_vcpu *vcpu, bool save_pmu)
 	}
 }
 
-static void load_p9_guest_pmu(struct kvm_vcpu *vcpu)
-{
-	mtspr(SPRN_PMC1, vcpu->arch.pmc[0]);
-	mtspr(SPRN_PMC2, vcpu->arch.pmc[1]);
-	mtspr(SPRN_PMC3, vcpu->arch.pmc[2]);
-	mtspr(SPRN_PMC4, vcpu->arch.pmc[3]);
-	mtspr(SPRN_PMC5, vcpu->arch.pmc[4]);
-	mtspr(SPRN_PMC6, vcpu->arch.pmc[5]);
-	mtspr(SPRN_MMCR1, vcpu->arch.mmcr[1]);
-	mtspr(SPRN_MMCR2, vcpu->arch.mmcr[2]);
-	mtspr(SPRN_SDAR, vcpu->arch.sdar);
-	mtspr(SPRN_SIAR, vcpu->arch.siar);
-	mtspr(SPRN_SIER, vcpu->arch.sier[0]);
-
-	if (cpu_has_feature(CPU_FTR_ARCH_31)) {
-		mtspr(SPRN_MMCR3, vcpu->arch.mmcr[4]);
-		mtspr(SPRN_SIER2, vcpu->arch.sier[1]);
-		mtspr(SPRN_SIER3, vcpu->arch.sier[2]);
-	}
-
-	/* Set MMCRA then MMCR0 last */
-	mtspr(SPRN_MMCRA, vcpu->arch.mmcra);
-	mtspr(SPRN_MMCR0, vcpu->arch.mmcr[0]);
-	/* No isync necessary because we're starting counters */
-}
-
-static void load_spr_state(struct kvm_vcpu *vcpu)
-{
-	mtspr(SPRN_DSCR, vcpu->arch.dscr);
-	mtspr(SPRN_IAMR, vcpu->arch.iamr);
-	mtspr(SPRN_PSPB, vcpu->arch.pspb);
-	mtspr(SPRN_FSCR, vcpu->arch.fscr);
-	mtspr(SPRN_TAR, vcpu->arch.tar);
-	mtspr(SPRN_EBBHR, vcpu->arch.ebbhr);
-	mtspr(SPRN_EBBRR, vcpu->arch.ebbrr);
-	mtspr(SPRN_BESCR, vcpu->arch.bescr);
-	mtspr(SPRN_TIDR, vcpu->arch.tid);
-	mtspr(SPRN_AMR, vcpu->arch.amr);
-	mtspr(SPRN_UAMOR, vcpu->arch.uamor);
-
-	/*
-	 * DAR, DSISR, and for nested HV, SPRGs must be set with MSR[RI]
-	 * clear (or hstate set appropriately to catch those registers
-	 * being clobbered if we take a MCE or SRESET), so those are done
-	 * later.
-	 */
-
-	if (!(vcpu->arch.ctrl & 1))
-		mtspr(SPRN_CTRLT, mfspr(SPRN_CTRLF) & ~1);
-}
-
-static void store_spr_state(struct kvm_vcpu *vcpu)
-{
-	vcpu->arch.ctrl = mfspr(SPRN_CTRLF);
-
-	vcpu->arch.iamr = mfspr(SPRN_IAMR);
-	vcpu->arch.pspb = mfspr(SPRN_PSPB);
-	vcpu->arch.fscr = mfspr(SPRN_FSCR);
-	vcpu->arch.tar = mfspr(SPRN_TAR);
-	vcpu->arch.ebbhr = mfspr(SPRN_EBBHR);
-	vcpu->arch.ebbrr = mfspr(SPRN_EBBRR);
-	vcpu->arch.bescr = mfspr(SPRN_BESCR);
-	vcpu->arch.tid = mfspr(SPRN_TIDR);
-	vcpu->arch.amr = mfspr(SPRN_AMR);
-	vcpu->arch.uamor = mfspr(SPRN_UAMOR);
-	vcpu->arch.dscr = mfspr(SPRN_DSCR);
-}
-
 static void save_p9_host_os_sprs(struct p9_host_os_sprs *host_os_sprs)
 {
 	host_os_sprs->dscr = mfspr(SPRN_DSCR);
@@ -3868,6 +3784,52 @@ static void save_p9_host_os_sprs(struct p9_host_os_sprs *host_os_sprs)
 	host_os_sprs->iamr = mfspr(SPRN_IAMR);
 	host_os_sprs->amr = mfspr(SPRN_AMR);
 	host_os_sprs->fscr = mfspr(SPRN_FSCR);
+
+	if (ppc_get_pmu_inuse()) {
+		bool do_isync = false;
+
+		/*
+		 * It might be better to put PMU handling (at least for the
+		 * host) in the perf subsystem because it knows more about what
+		 * is being used.
+		 */
+
+		/* POWER9, POWER10 do not implement HPMC or SPMC */
+
+		host_os_sprs->mmcr0 = mfspr(SPRN_MMCR0);
+		host_os_sprs->mmcra = mfspr(SPRN_MMCRA);
+
+		if (host_os_sprs->mmcr0 != MMCR0_FC) {
+			/* Freeze counters */
+			mtspr(SPRN_MMCR0, MMCR0_FC);
+			do_isync = true;
+		}
+		if (host_os_sprs->mmcra != 0) {
+			/* Clear MMCRA in order to disable SDAR updates */
+			mtspr(SPRN_MMCRA, 0);
+			do_isync = true;
+		}
+		if (do_isync)
+			isync();
+
+		host_os_sprs->pmc1 = mfspr(SPRN_PMC1);
+		host_os_sprs->pmc2 = mfspr(SPRN_PMC2);
+		host_os_sprs->pmc3 = mfspr(SPRN_PMC3);
+		host_os_sprs->pmc4 = mfspr(SPRN_PMC4);
+		host_os_sprs->pmc5 = mfspr(SPRN_PMC5);
+		host_os_sprs->pmc6 = mfspr(SPRN_PMC6);
+		host_os_sprs->mmcr1 = mfspr(SPRN_MMCR1);
+		host_os_sprs->mmcr2 = mfspr(SPRN_MMCR2);
+		host_os_sprs->sdar = mfspr(SPRN_SDAR);
+		host_os_sprs->siar = mfspr(SPRN_SIAR);
+		host_os_sprs->sier1 = mfspr(SPRN_SIER);
+
+		if (cpu_has_feature(CPU_FTR_ARCH_31)) {
+			host_os_sprs->mmcr3 = mfspr(SPRN_MMCR3);
+			host_os_sprs->sier2 = mfspr(SPRN_SIER2);
+			host_os_sprs->sier3 = mfspr(SPRN_SIER3);
+		}
+	}
 }
 
 /* vcpu guest regs must already be saved */
@@ -3890,6 +3852,31 @@ static void restore_p9_host_os_sprs(struct kvm_vcpu *vcpu,
 	/* Save guest CTRL register, set runlatch to 1 */
 	if (!(vcpu->arch.ctrl & 1))
 		mtspr(SPRN_CTRLT, 1);
+
+	if (ppc_get_pmu_inuse()) {
+		mtspr(SPRN_PMC1, host_os_sprs->pmc1);
+		mtspr(SPRN_PMC2, host_os_sprs->pmc2);
+		mtspr(SPRN_PMC3, host_os_sprs->pmc3);
+		mtspr(SPRN_PMC4, host_os_sprs->pmc4);
+		mtspr(SPRN_PMC5, host_os_sprs->pmc5);
+		mtspr(SPRN_PMC6, host_os_sprs->pmc6);
+		mtspr(SPRN_MMCR1, host_os_sprs->mmcr1);
+		mtspr(SPRN_MMCR2, host_os_sprs->mmcr2);
+		mtspr(SPRN_SDAR, host_os_sprs->sdar);
+		mtspr(SPRN_SIAR, host_os_sprs->siar);
+		mtspr(SPRN_SIER, host_os_sprs->sier1);
+
+		if (cpu_has_feature(CPU_FTR_ARCH_31)) {
+			mtspr(SPRN_MMCR3, host_os_sprs->mmcr3);
+			mtspr(SPRN_SIER2, host_os_sprs->sier2);
+			mtspr(SPRN_SIER3, host_os_sprs->sier3);
+		}
+
+		/* Set MMCRA then MMCR0 last */
+		mtspr(SPRN_MMCRA, host_os_sprs->mmcra);
+		mtspr(SPRN_MMCR0, host_os_sprs->mmcr0);
+		isync();
+	}
 }
 
 static inline bool hcall_is_xics(unsigned long req)
@@ -3931,18 +3918,12 @@ static int kvmhv_p9_guest_entry(struct kvm_vcpu *vcpu, u64 time_limit,
 
 	save_p9_host_os_sprs(&host_os_sprs);
 
-	save_p9_host_pmu(&host_os_sprs);
-
 	kvmppc_subcore_enter_guest();
 
 	vc->entry_exit_map = 1;
 	vc->in_guest = 1;
 
 	vcpu_vpa_increment_dispatch(vcpu);
-
-	if (cpu_has_feature(CPU_FTR_TM) ||
-	    cpu_has_feature(CPU_FTR_P9_TM_HV_ASSIST))
-		kvmppc_restore_tm_hv(vcpu, vcpu->arch.shregs.msr, true);
 
 #ifdef CONFIG_PPC_PSERIES
 	if (kvmhv_on_pseries()) {
@@ -3954,7 +3935,12 @@ static int kvmhv_p9_guest_entry(struct kvm_vcpu *vcpu, u64 time_limit,
 		}
 	}
 #endif
-	load_p9_guest_pmu(vcpu);
+
+	if (cpu_has_feature(CPU_FTR_TM) ||
+	    cpu_has_feature(CPU_FTR_P9_TM_HV_ASSIST))
+		kvmppc_restore_tm_hv(vcpu, vcpu->arch.shregs.msr, true);
+
+	load_spr_state(vcpu, &host_os_sprs);
 
 	msr_check_and_set(MSR_FP | MSR_VEC | MSR_VSX);
 	load_fp_state(&vcpu->arch.fp);
@@ -3962,8 +3948,6 @@ static int kvmhv_p9_guest_entry(struct kvm_vcpu *vcpu, u64 time_limit,
 	load_vr_state(&vcpu->arch.vr);
 #endif
 	mtspr(SPRN_VRSAVE, vcpu->arch.vrsave);
-
-	load_spr_state(vcpu);
 
 	/*
 	 * When setting DEC, we must always deal with irq_work_raise via NMI vs
@@ -4061,7 +4045,20 @@ static int kvmhv_p9_guest_entry(struct kvm_vcpu *vcpu, u64 time_limit,
 	vcpu->cpu = -1;
 	vcpu->arch.thread_cpu = -1;
 
-	store_spr_state(vcpu);
+	vcpu_vpa_increment_dispatch(vcpu);
+
+	save_pmu = 1;
+	if (vcpu->arch.vpa.pinned_addr) {
+		struct lppaca *lp = vcpu->arch.vpa.pinned_addr;
+		save_pmu = lp->pmcregs_in_use;
+	}
+
+	store_spr_state(vcpu, save_pmu);
+
+#ifdef CONFIG_PPC_PSERIES
+	if (kvmhv_on_pseries())
+		get_lppaca()->pmcregs_in_use = ppc_get_pmu_inuse();
+#endif
 
 	restore_p9_host_os_sprs(vcpu, &host_os_sprs);
 
@@ -4076,28 +4073,12 @@ static int kvmhv_p9_guest_entry(struct kvm_vcpu *vcpu, u64 time_limit,
 	    cpu_has_feature(CPU_FTR_P9_TM_HV_ASSIST))
 		kvmppc_save_tm_hv(vcpu, vcpu->arch.shregs.msr, true);
 
-	vcpu_vpa_increment_dispatch(vcpu);
-
-	save_pmu = 1;
-	if (vcpu->arch.vpa.pinned_addr) {
-		struct lppaca *lp = vcpu->arch.vpa.pinned_addr;
-		save_pmu = lp->pmcregs_in_use;
-	}
-
-	save_p9_guest_pmu(vcpu, save_pmu);
-#ifdef CONFIG_PPC_PSERIES
-	if (kvmhv_on_pseries())
-		get_lppaca()->pmcregs_in_use = ppc_get_pmu_inuse();
-#endif
-
 	vc->entry_exit_map = 0x101;
 	vc->in_guest = 0;
 
 	timer_rearm_host_dec(tb);
 
 	mtspr(SPRN_SPRG_VDSO_WRITE, local_paca->sprg_vdso);
-
-	load_p9_host_pmu(&host_os_sprs);
 
 	kvmppc_subcore_exit_guest();
 
