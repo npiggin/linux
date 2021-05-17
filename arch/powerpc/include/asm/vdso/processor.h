@@ -13,7 +13,7 @@
 #define HMT_high()		asm volatile("or 3, 3, 3	# high priority")
 
 #ifdef CONFIG_PPC64
-#define cpu_relax()	do { HMT_low(); HMT_medium(); barrier(); } while (0)
+#define cpu_relax()	do { asm volatile("pause_short" ::: "memory"); } while (0)
 #else
 #define cpu_relax()	barrier()
 #endif

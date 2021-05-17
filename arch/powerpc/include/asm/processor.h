@@ -331,27 +331,6 @@ static inline unsigned long __pack_fe01(unsigned int fpmode)
 	return ((fpmode << 10) & MSR_FE0) | ((fpmode << 8) & MSR_FE1);
 }
 
-#ifdef CONFIG_PPC64
-
-#define spin_begin()	HMT_low()
-
-#define spin_cpu_relax()	barrier()
-
-#define spin_end()	HMT_medium()
-
-#define spin_until_cond(cond)					\
-do {								\
-	if (unlikely(!(cond))) {				\
-		spin_begin();					\
-		do {						\
-			spin_cpu_relax();			\
-		} while (!(cond));				\
-		spin_end();					\
-	}							\
-} while (0)
-
-#endif
-
 /* Check that a certain kernel stack pointer is valid in task_struct p */
 int validate_sp(unsigned long sp, struct task_struct *p,
                        unsigned long nbytes);
