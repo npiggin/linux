@@ -1019,9 +1019,14 @@ EXPORT_SYMBOL(__page_cache_alloc);
  * collisions.
  */
 #define PAGE_WAIT_TABLE_SIZE (1 << PAGE_WAIT_TABLE_BITS)
+#if CONFIG_BASE_SMALL
+#define PAGE_WAIT_TABLE_BITS 4
+static wait_queue_head_t page_wait_table[PAGE_WAIT_TABLE_SIZE] __cacheline_aligned;
+#else
 #define PAGE_WAIT_TABLE_BITS page_wait_table_bits
 static unsigned int page_wait_table_bits __ro_after_init;
 static wait_queue_head_t *page_wait_table __ro_after_init;
+#endif
 
 static wait_queue_head_t *page_waitqueue(struct page *page)
 {
@@ -1032,6 +1037,7 @@ void __init pagecache_init(void)
 {
 	int i;
 
+#if !CONFIG_BASE_SMALL
 	page_wait_table = alloc_large_system_hash("page waitqueue hash",
 						sizeof(wait_queue_head_t),
 						0,
@@ -1041,6 +1047,7 @@ void __init pagecache_init(void)
 						NULL,
 						0,
 						0);
+#endif
 
 	for (i = 0; i < PAGE_WAIT_TABLE_SIZE; i++)
 		init_waitqueue_head(&page_wait_table[i]);

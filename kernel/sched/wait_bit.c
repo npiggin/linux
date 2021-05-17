@@ -6,9 +6,14 @@
 #include "sched.h"
 
 #define BIT_WAIT_TABLE_SIZE (1 << BIT_WAIT_TABLE_BITS)
+#if CONFIG_BASE_SMALL
+#define BIT_WAIT_TABLE_BITS 3
+static wait_queue_head_t bit_wait_table[BIT_WAIT_TABLE_SIZE] __cacheline_aligned;
+#else
 #define BIT_WAIT_TABLE_BITS bit_wait_table_bits
 static unsigned int bit_wait_table_bits __ro_after_init;
 static wait_queue_head_t *bit_wait_table __ro_after_init;
+#endif
 
 wait_queue_head_t *bit_waitqueue(void *word, int bit)
 {
@@ -247,6 +252,7 @@ void __init wait_bit_init(void)
 {
 	int i;
 
+#if !CONFIG_BASE_SMALL
 	bit_wait_table = alloc_large_system_hash("bit waitqueue hash",
 						sizeof(wait_queue_head_t),
 						0,
@@ -256,6 +262,7 @@ void __init wait_bit_init(void)
 						NULL,
 						0,
 						0);
+#endif
 
 	for (i = 0; i < BIT_WAIT_TABLE_SIZE; i++)
 		init_waitqueue_head(bit_wait_table + i);
