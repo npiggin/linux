@@ -45,9 +45,9 @@ static int snooze_loop(struct cpuidle_device *dev,
 	local_irq_enable();
 	snooze_exit_time = get_tb() + snooze_timeout;
 
+	HMT_very_low();
+
 	while (!need_resched()) {
-		HMT_low();
-		HMT_very_low();
 		if (likely(snooze_timeout_en) && get_tb() > snooze_exit_time) {
 			/*
 			 * Task has not woken up but we are exiting the polling
@@ -58,6 +58,7 @@ static int snooze_loop(struct cpuidle_device *dev,
 			smp_mb();
 			break;
 		}
+		cpu_relax();
 	}
 
 	HMT_medium();
