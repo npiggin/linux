@@ -5719,13 +5719,27 @@ DEFINE_PER_CPU(cpumask_var_t, select_idle_mask);
 
 #ifdef CONFIG_NO_HZ_COMMON
 
-static struct {
+struct nohz {
 	cpumask_var_t idle_cpus_mask;
 	atomic_t nr_cpus;
 	int has_blocked;		/* Idle CPUS has blocked load */
 	unsigned long next_balance;     /* in jiffy units */
 	unsigned long next_blocked;	/* Next update of blocked load in jiffies */
-} nohz ____cacheline_aligned;
+} ____cacheline_aligned;
+
+static struct nohz **nohz_nodes __ro_after_init;
+
+static struct nohz *get_nohz(void)
+{
+#ifdef CONFIG_CPU_ISOLATION
+	/*
+	 * May not have a house keeping CPU per node, do global idle balancing.
+	 */
+	if (static_branch_unlikely(&housekeeping_overridden))
+		return nohz_nodes[0];
+#endif
+	return nohz_nodes[numa_node_id()];
+}
 
 #endif /* CONFIG_NO_HZ_COMMON */
 
@@ -10126,7 +10140,7 @@ static inline int find_new_ilb(void)
 {
 	int ilb;
 
-	for_each_cpu_and(ilb, nohz.idle_cpus_mask,
+	for_each_cpu_and(ilb, get_nohz()->idle_cpus_mask,
 			      housekeeping_cpumask(HK_FLAG_MISC)) {
 
 		if (ilb == smp_processor_id())
@@ -10152,7 +10166,7 @@ static void kick_ilb(unsigned int flags)
 	 * not if we only update stats.
 	 */
 	if (flags & NOHZ_BALANCE_KICK)
-		nohz.next_balance = jiffies+1;
+		get_nohz()->next_balance = jiffies+1;
 
 	ilb_cpu = find_new_ilb();
 
@@ -10200,14 +10214,14 @@ static void nohz_balancer_kick(struct rq *rq)
 	 * None are in tickless mode and hence no need for NOHZ idle load
 	 * balancing.
 	 */
-	if (likely(!atomic_read(&nohz.nr_cpus)))
+	if (likely(!atomic_read(&get_nohz()->nr_cpus)))
 		return;
 
-	if (READ_ONCE(nohz.has_blocked) &&
-	    time_after(now, READ_ONCE(nohz.next_blocked)))
+	if (READ_ONCE(get_nohz()->has_blocked) &&
+	    time_after(now, READ_ONCE(get_nohz()->next_blocked)))
 		flags = NOHZ_STATS_KICK;
 
-	if (time_before(now, nohz.next_balance))
+	if (time_before(now, get_nohz()->next_balance))
 		goto out;
 
 	if (rq->nr_running >= 2) {
@@ -10237,7 +10251,7 @@ static void nohz_balancer_kick(struct rq *rq)
 		 * currently idle; in which case, kick the ILB to move tasks
 		 * around.
 		 */
-		for_each_cpu_and(i, sched_domain_span(sd), nohz.idle_cpus_mask) {
+		for_each_cpu_and(i, sched_domain_span(sd), get_nohz()->idle_cpus_mask) {
 			if (sched_asym_prefer(i, cpu)) {
 				flags = NOHZ_KICK_MASK;
 				goto unlock;
@@ -10314,8 +10328,8 @@ void nohz_balance_exit_idle(struct rq *rq)
 		return;
 
 	rq->nohz_tick_stopped = 0;
-	cpumask_clear_cpu(rq->cpu, nohz.idle_cpus_mask);
-	atomic_dec(&nohz.nr_cpus);
+	cpumask_clear_cpu(rq->cpu, get_nohz()->idle_cpus_mask);
+	atomic_dec(&get_nohz()->nr_cpus);
 
 	set_cpu_sd_state_busy(rq->cpu);
 }
@@ -10376,8 +10390,8 @@ void nohz_balance_enter_idle(int cpu)
 
 	rq->nohz_tick_stopped = 1;
 
-	cpumask_set_cpu(cpu, nohz.idle_cpus_mask);
-	atomic_inc(&nohz.nr_cpus);
+	cpumask_set_cpu(cpu, get_nohz()->idle_cpus_mask);
+	atomic_inc(&get_nohz()->nr_cpus);
 
 	/*
 	 * Ensures that if nohz_idle_balance() fails to observe our
@@ -10393,7 +10407,7 @@ out:
 	 * Each time a cpu enter idle, we assume that it has blocked load and
 	 * enable the periodic update of the load of idle cpus
 	 */
-	WRITE_ONCE(nohz.has_blocked, 1);
+	WRITE_ONCE(get_nohz()->has_blocked, 1);
 }
 
 static bool update_nohz_stats(struct rq *rq)
@@ -10403,7 +10417,7 @@ static bool update_nohz_stats(struct rq *rq)
 	if (!rq->has_blocked_load)
 		return false;
 
-	if (!cpumask_test_cpu(cpu, nohz.idle_cpus_mask))
+	if (!cpumask_test_cpu(cpu, get_nohz()->idle_cpus_mask))
 		return false;
 
 	if (!time_after(jiffies, READ_ONCE(rq->last_blocked_load_update_tick)))
@@ -10441,7 +10455,7 @@ static void _nohz_idle_balance(struct rq *this_rq, unsigned int flags,
 	 * setting the flag, we are sure to not clear the state and not
 	 * check the load of an idle cpu.
 	 */
-	WRITE_ONCE(nohz.has_blocked, 0);
+	WRITE_ONCE(get_nohz()->has_blocked, 0);
 
 	/*
 	 * Ensures that if we miss the CPU, we must see the has_blocked
@@ -10453,10 +10467,7 @@ static void _nohz_idle_balance(struct rq *this_rq, unsigned int flags,
 	 * Start with the next CPU after this_cpu so we will end with this_cpu and let a
 	 * chance for other idle cpu to pull load.
 	 */
-	for_each_cpu_wrap(balance_cpu,  nohz.idle_cpus_mask, this_cpu+1) {
-		if (!idle_cpu(balance_cpu))
-			continue;
-
+	for_each_cpu_wrap(balance_cpu,  get_nohz()->idle_cpus_mask, this_cpu+1) {
 		/*
 		 * If this CPU gets work to do, stop the load balancing
 		 * work being done for other CPUs. Next load
@@ -10466,6 +10477,9 @@ static void _nohz_idle_balance(struct rq *this_rq, unsigned int flags,
 			has_blocked_load = true;
 			goto abort;
 		}
+
+		if (!idle_cpu(balance_cpu))
+			continue;
 
 		rq = cpu_rq(balance_cpu);
 
@@ -10498,15 +10512,15 @@ static void _nohz_idle_balance(struct rq *this_rq, unsigned int flags,
 	 * updated.
 	 */
 	if (likely(update_next_balance))
-		nohz.next_balance = next_balance;
+		get_nohz()->next_balance = next_balance;
 
-	WRITE_ONCE(nohz.next_blocked,
+	WRITE_ONCE(get_nohz()->next_blocked,
 		now + msecs_to_jiffies(LOAD_AVG_PERIOD));
 
 abort:
 	/* There is still blocked load, enable periodic update */
 	if (has_blocked_load)
-		WRITE_ONCE(nohz.has_blocked, 1);
+		WRITE_ONCE(get_nohz()->has_blocked, 1);
 }
 
 /*
@@ -10564,8 +10578,8 @@ static void nohz_newidle_balance(struct rq *this_rq)
 		return;
 
 	/* Don't need to update blocked load of idle CPUs*/
-	if (!READ_ONCE(nohz.has_blocked) ||
-	    time_before(jiffies, READ_ONCE(nohz.next_blocked)))
+	if (!READ_ONCE(get_nohz()->has_blocked) ||
+	    time_before(jiffies, READ_ONCE(get_nohz()->next_blocked)))
 		return;
 
 	/*
@@ -11357,9 +11371,29 @@ __init void init_sched_fair_class(void)
 	open_softirq(SCHED_SOFTIRQ, run_rebalance_domains);
 
 #ifdef CONFIG_NO_HZ_COMMON
-	nohz.next_balance = jiffies;
-	nohz.next_blocked = jiffies;
-	zalloc_cpumask_var(&nohz.idle_cpus_mask, GFP_NOWAIT);
+	if (static_branch_unlikely(&housekeeping_overridden)) {
+		struct nohz *nohz;
+
+		nohz_nodes = kcalloc(1, sizeof(struct nohz *), GFP_NOWAIT);
+		nohz = kmalloc(sizeof(struct nohz), GFP_NOWAIT);
+		nohz->next_balance = jiffies;
+		nohz->next_blocked = jiffies;
+		zalloc_cpumask_var(&nohz->idle_cpus_mask, GFP_NOWAIT);
+		nohz_nodes[0] = nohz;
+	} else {
+		int n;
+
+		nohz_nodes = kcalloc(nr_node_ids, sizeof(struct nohz *), GFP_NOWAIT);
+		for_each_node(n) {
+			struct nohz *nohz;
+
+			nohz = kmalloc_node(sizeof(struct nohz), GFP_NOWAIT, n);
+			nohz->next_balance = jiffies;
+			nohz->next_blocked = jiffies;
+			zalloc_cpumask_var_node(&nohz->idle_cpus_mask, GFP_NOWAIT, n);
+			nohz_nodes[n] = nohz;
+		}
+	}
 #endif
 #endif /* SMP */
 
