@@ -23,6 +23,8 @@
 #include <asm/plpar_wrappers.h>
 #include <asm/rtas.h>
 
+extern long cede_latency_override;
+
 static struct cpuidle_driver pseries_idle_driver = {
 	.name             = "pseries_idle",
 	.owner            = THIS_MODULE,
@@ -352,11 +354,26 @@ static int pseries_cpuidle_driver_init(void)
 	return 0;
 }
 
+static void __init override_cede0_latency(void)
+{
+	if (cede_latency_override != -1L) {
+		dedicated_states[1].exit_latency = cede_latency_override;
+		dedicated_states[1].target_residency = 10 * (cede_latency_override);
+		shared_states[1].exit_latency = cede_latency_override;
+		shared_states[1].target_residency = 10 * (cede_latency_override);
+		pr_info("cpuidle: Override CEDE exit latency to %ld us\n",
+			cede_latency_override);
+	}
+}
+
 static void __init fixup_cede0_latency(void)
 {
 	struct xcede_latency_payload *payload;
 	u64 min_latency_us;
 	int i;
+
+	if (cede_latency_override != -1L)
+		return; /* already set */
 
 	min_latency_us = dedicated_states[1].exit_latency; // CEDE latency
 
@@ -418,6 +435,8 @@ static int pseries_idle_probe(void)
 		return -ENODEV;
 
 	if (firmware_has_feature(FW_FEATURE_SPLPAR)) {
+		override_cede0_latency();
+
 		/*
 		 * Use local_paca instead of get_lppaca() since
 		 * preemption is not disabled, and it is not required in

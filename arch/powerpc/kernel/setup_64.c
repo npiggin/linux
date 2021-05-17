@@ -120,6 +120,15 @@ void __init setup_tlb_core_data(void)
 }
 #endif
 
+long cede_latency_override = -1L;
+EXPORT_SYMBOL(cede_latency_override);
+
+static int __init setup_cede_latency_override(char *str)
+{
+	return (kstrtol(str, 0, &cede_latency_override) == 0);
+}
+__setup("cede_us=", setup_cede_latency_override);
+
 #ifdef CONFIG_SMP
 
 static char *smt_enabled_cmdline;
