@@ -268,13 +268,16 @@ static struct cpuidle_state dedicated_states[NR_DEDICATED_STATES] = {
 		.desc = "snooze",
 		.exit_latency = 0,
 		.target_residency = 0,
-		.enter = &snooze_loop },
+		.enter = &snooze_loop,
+		.flags = CPUIDLE_FLAG_POLLING,
+	},
 	{ /* CEDE */
 		.name = "CEDE",
 		.desc = "CEDE",
 		.exit_latency = 10,
 		.target_residency = 100,
-		.enter = &dedicated_cede_loop },
+		.enter = &dedicated_cede_loop,
+	},
 };
 
 /*
@@ -286,13 +289,16 @@ static struct cpuidle_state shared_states[] = {
 		.desc = "snooze",
 		.exit_latency = 0,
 		.target_residency = 0,
-		.enter = &snooze_loop },
+		.enter = &snooze_loop,
+		.flags = CPUIDLE_FLAG_POLLING,
+	},
 	{ /* Shared Cede */
 		.name = "Shared Cede",
 		.desc = "Shared Cede",
 		.exit_latency = 10,
 		.target_residency = 100,
-		.enter = &shared_cede_loop },
+		.enter = &shared_cede_loop,
+	},
 };
 
 static int pseries_cpuidle_cpu_online(unsigned int cpu)

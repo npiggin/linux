@@ -155,7 +155,9 @@ static struct cpuidle_state powernv_states[CPUIDLE_STATE_MAX] = {
 		.desc = "snooze",
 		.exit_latency = 0,
 		.target_residency = 0,
-		.enter = snooze_loop },
+		.enter = snooze_loop,
+		.flags = CPUIDLE_FLAG_POLLING,
+	},
 };
 
 static int powernv_cpuidle_cpu_online(unsigned int cpu)
