@@ -45,8 +45,6 @@ static int snooze_loop(struct cpuidle_device *dev,
 	local_irq_enable();
 	snooze_exit_time = get_tb() + snooze_timeout;
 
-	HMT_very_low();
-
 	while (!need_resched()) {
 		if (likely(snooze_timeout_en) && get_tb() > snooze_exit_time) {
 			/*
@@ -58,10 +56,14 @@ static int snooze_loop(struct cpuidle_device *dev,
 			smp_mb();
 			break;
 		}
-		cpu_relax();
+		/*
+		 * waitrsv is not implemented on P10, it just uses a timeout
+		 * so we don't have to acquire a reservation on the thread
+		 * flag.
+		 */
+		asm volatile("waitrsv" ::: "memory");
 	}
 
-	HMT_medium();
 	clear_thread_flag(TIF_POLLING_NRFLAG);
 
 	local_irq_disable();
