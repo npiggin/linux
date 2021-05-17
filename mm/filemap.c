@@ -34,6 +34,7 @@
 #include <linux/security.h>
 #include <linux/cpuset.h>
 #include <linux/hugetlb.h>
+#include <linux/memblock.h>
 #include <linux/memcontrol.h>
 #include <linux/cleancache.h>
 #include <linux/shmem_fs.h>
@@ -1017,9 +1018,10 @@ EXPORT_SYMBOL(__page_cache_alloc);
  * at a cost of "thundering herd" phenomena during rare hash
  * collisions.
  */
-#define PAGE_WAIT_TABLE_BITS 8
 #define PAGE_WAIT_TABLE_SIZE (1 << PAGE_WAIT_TABLE_BITS)
-static wait_queue_head_t page_wait_table[PAGE_WAIT_TABLE_SIZE] __cacheline_aligned;
+#define PAGE_WAIT_TABLE_BITS page_wait_table_bits
+static unsigned int page_wait_table_bits __ro_after_init;
+static wait_queue_head_t *page_wait_table __ro_after_init;
 
 static wait_queue_head_t *page_waitqueue(struct page *page)
 {
@@ -1029,6 +1031,16 @@ static wait_queue_head_t *page_waitqueue(struct page *page)
 void __init pagecache_init(void)
 {
 	int i;
+
+	page_wait_table = alloc_large_system_hash("page waitqueue hash",
+						sizeof(wait_queue_head_t),
+						0,
+						21,
+						0,
+						&page_wait_table_bits,
+						NULL,
+						0,
+						0);
 
 	for (i = 0; i < PAGE_WAIT_TABLE_SIZE; i++)
 		init_waitqueue_head(&page_wait_table[i]);
