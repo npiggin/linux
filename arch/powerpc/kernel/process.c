@@ -1504,6 +1504,18 @@ static void __show_regs(struct pt_regs *regs)
 			pr_cont("DAR: "REG" DSISR: %08lx ", regs->dar, regs->dsisr);
 	}
 
+#if defined(CONFIG_PPC_PKEY) || defined(CONFIG_PPC_KUAP)
+ #ifdef CONFIG_PPC_PKEY
+	if (mmu_has_feature(MMU_FTR_PKEY))
+		pr_cont("AMR:  "REG" IAMR: "REG" ", regs->amr, regs->iamr);
+ #endif
+ #ifdef CONFIG_PPC_KUAP
+	if (mmu_has_feature(MMU_FTR_BOOK3S_KUAP))
+		pr_cont("KUAP:  "REG" ", regs->kuap);
+ #endif
+	pr_cont("\n");
+#endif
+
 #ifdef CONFIG_PPC64
 	pr_cont("IRQMASK: %lx ", regs->softe);
 #endif
