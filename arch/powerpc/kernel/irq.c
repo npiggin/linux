@@ -142,6 +142,7 @@ again:
 	 * replay it first.
 	 */
 	if (IS_ENABLED(CONFIG_PPC_BOOK3S) && (local_paca->irq_happened & PACA_IRQ_HMI)) {
+		__this_cpu_inc(irq_stat.replayed_irqs);
 		local_paca->irq_happened &= ~PACA_IRQ_HMI;
 		regs.trap = INTERRUPT_HMI;
 		handle_hmi_exception(&regs);
@@ -150,6 +151,7 @@ again:
 	}
 
 	if (local_paca->irq_happened & PACA_IRQ_DEC) {
+		__this_cpu_inc(irq_stat.replayed_irqs);
 		local_paca->irq_happened &= ~PACA_IRQ_DEC;
 		regs.trap = INTERRUPT_DECREMENTER;
 		timer_interrupt(&regs);
@@ -158,6 +160,7 @@ again:
 	}
 
 	if (local_paca->irq_happened & PACA_IRQ_EE) {
+		__this_cpu_inc(irq_stat.replayed_irqs);
 		local_paca->irq_happened &= ~PACA_IRQ_EE;
 		regs.trap = INTERRUPT_EXTERNAL;
 		do_IRQ(&regs);
@@ -166,6 +169,7 @@ again:
 	}
 
 	if (IS_ENABLED(CONFIG_PPC_DOORBELL) && (local_paca->irq_happened & PACA_IRQ_DBELL)) {
+		__this_cpu_inc(irq_stat.replayed_irqs);
 		local_paca->irq_happened &= ~PACA_IRQ_DBELL;
 		regs.trap = INTERRUPT_DOORBELL;
 		doorbell_exception(&regs);
@@ -175,6 +179,7 @@ again:
 
 	/* Book3E does not support soft-masking PMI interrupts */
 	if (IS_ENABLED(CONFIG_PPC_BOOK3S) && (local_paca->irq_happened & PACA_IRQ_PMI)) {
+		__this_cpu_inc(irq_stat.replayed_irqs);
 		local_paca->irq_happened &= ~PACA_IRQ_PMI;
 		regs.trap = INTERRUPT_PERFMON;
 		performance_monitor_exception(&regs);
@@ -637,6 +642,13 @@ int arch_show_interrupts(struct seq_file *p, int prec)
 			seq_printf(p, "%10u ", per_cpu(irq_stat, j).doorbell_irqs);
 		seq_printf(p, "  Doorbell interrupts\n");
 	}
+#endif
+
+#ifdef CONFIG_PPC64
+	seq_printf(p, "%*s: ", prec, "RPL");
+	for_each_online_cpu(j)
+		seq_printf(p, "%10u ", per_cpu(irq_stat, j).replayed_irqs);
+	seq_printf(p, "  Replayed soft-masked interrupts\n");
 #endif
 
 	return 0;
