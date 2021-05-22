@@ -127,7 +127,6 @@ notrace long system_call_exception(long r3, long r4, long r5,
 	booke_restore_dbcr0();
 
 	account_cpu_user_entry();
-
 	account_stolen_time();
 
 	/*

@@ -156,6 +156,12 @@ static inline void interrupt_enter_prepare(struct pt_regs *regs, struct interrup
 	} else {
 		irq_soft_mask_set(IRQS_DISABLED);
 	}
+
+	if (user_mode(regs)) {
+		account_cpu_user_entry();
+		account_stolen_time();
+	}
+
 	/* If the interrupt was taken with HARD_DIS set, don't enable MSR[EE] */
 	if (local_paca->irq_happened & PACA_IRQ_HARD_DIS)
 		__hard_RI_enable();
@@ -167,9 +173,6 @@ static inline void interrupt_enter_prepare(struct pt_regs *regs, struct interrup
 	if (user_mode(regs)) {
 		CT_WARN_ON(ct_state() != CONTEXT_USER);
 		user_exit_irqoff();
-
-		account_cpu_user_entry();
-		account_stolen_time();
 	} else {
 		/*
 		 * CT_WARN_ON comes here via program_check_exception,
