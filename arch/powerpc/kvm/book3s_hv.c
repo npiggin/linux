@@ -1080,7 +1080,9 @@ int kvmppc_pseries_do_hcall(struct kvm_vcpu *vcpu)
 		break;
 
 	case H_CEDE:
+		ret = kvmhv_handle_cede(vcpu);
 		break;
+
 	case H_PROD:
 		target = kvmppc_get_gpr(vcpu, 4);
 		tvcpu = kvmppc_find_vcpu(kvm, target);
@@ -1292,25 +1294,6 @@ int kvmppc_pseries_do_hcall(struct kvm_vcpu *vcpu)
 	return RESUME_GUEST;
 }
 
-/*
- * Handle H_CEDE in the P9 path where we don't call the real-mode hcall
- * handlers in book3s_hv_rmhandlers.S.
- *
- * This has to be done early, not in kvmppc_pseries_do_hcall(), so
- * that the cede logic in kvmppc_run_single_vcpu() works properly.
- */
-static void kvmppc_cede(struct kvm_vcpu *vcpu)
-{
-	vcpu->arch.shregs.msr |= MSR_EE;
-	vcpu->arch.ceded = 1;
-	smp_mb();
-	if (vcpu->arch.prodded) {
-		vcpu->arch.prodded = 0;
-		smp_mb();
-		vcpu->arch.ceded = 0;
-	}
-}
-
 static int kvmppc_hcall_impl_hv(unsigned long cmd)
 {
 	switch (cmd) {
@@ -1490,6 +1473,8 @@ static int kvmppc_tm_unavailable(struct kvm_vcpu *vcpu)
 
 	return RESUME_GUEST;
 }
+
+static int kvmhv_handle_cede(struct kvm_vcpu *vcpu);
 
 static int kvmppc_handle_exit_hv(struct kvm_vcpu *vcpu,
 				 struct task_struct *tsk)
@@ -4015,20 +4000,10 @@ static int kvmhv_p9_guest_entry(struct kvm_vcpu *vcpu, u64 time_limit,
 	else if (*tb >= time_limit) /* nested time limit */
 		return BOOK3S_INTERRUPT_NESTED_HV_DECREMENTER;
 
-	vcpu->arch.ceded = 0;
-
 	vcpu_vpa_increment_dispatch(vcpu);
 
 	if (kvmhv_on_pseries()) {
 		trap = kvmhv_vcpu_entry_p9_nested(vcpu, time_limit, lpcr, tb);
-
-		/* H_CEDE has to be handled now, not later */
-		if (trap == BOOK3S_INTERRUPT_SYSCALL && !vcpu->arch.nested &&
-		    kvmppc_get_gpr(vcpu, 3) == H_CEDE) {
-			kvmppc_cede(vcpu);
-			kvmppc_set_gpr(vcpu, 3, 0);
-			trap = 0;
-		}
 
 	} else {
 		struct kvm *kvm = vcpu->kvm;
@@ -4043,12 +4018,12 @@ static int kvmhv_p9_guest_entry(struct kvm_vcpu *vcpu, u64 time_limit,
 		    !(vcpu->arch.shregs.msr & MSR_PR)) {
 			unsigned long req = kvmppc_get_gpr(vcpu, 3);
 
-			/* H_CEDE has to be handled now, not later */
+			/* Have to rearm before pulling xive, may abort cede */
 			if (req == H_CEDE) {
-				kvmppc_cede(vcpu);
-				kvmppc_xive_rearm_escalation(vcpu); /* may un-cede */
-				kvmppc_set_gpr(vcpu, 3, 0);
-				trap = 0;
+				if (kvmppc_xive_rearm_escalation(vcpu)) {
+					kvmppc_set_gpr(vcpu, 3, H_SUCCESS);
+					trap = 0;
+				}
 
 			/* XICS hcalls must be handled before xive is pulled */
 			} else if (hcall_is_xics(req)) {
@@ -4423,6 +4398,60 @@ static int kvmppc_run_vcpu(struct kvm_vcpu *vcpu)
 	return vcpu->arch.ret;
 }
 
+/* H_CEDE for the P9 path, P7/8 is handled by realmode handlers */
+static int kvmhv_handle_cede(struct kvm_vcpu *vcpu)
+{
+	struct kvmppc_vcore *vc = vcpu->arch.vcore;
+	struct kvm_run *run = vcpu->run;
+
+	kvmppc_set_gpr(vcpu, 3, H_SUCCESS);
+	vcpu->arch.trap = 0;
+	vcpu->arch.shregs.msr |= MSR_EE;
+
+	vcpu->arch.ceded = 1;
+	smp_mb();
+	if (vcpu->arch.prodded) {
+		vcpu->arch.prodded = 0;
+		smp_mb();
+		vcpu->arch.ceded = 0;
+		return RESUME_GUEST;
+	}
+
+	if (kvmppc_vcpu_woken(vcpu)) {
+		vcpu->arch.ceded = 0;
+		return RESUME_GUEST;
+	}
+
+	kvmppc_set_timer(vcpu);
+
+	prepare_to_rcuwait(&vcpu->wait);
+	for (;;) {
+		set_current_state(TASK_INTERRUPTIBLE);
+		if (signal_pending(current)) {
+			vcpu->stat.signal_exits++;
+			run->exit_reason = KVM_EXIT_INTR;
+			vcpu->arch.ret = -EINTR;
+			return RESUME_GUEST;
+		}
+
+		if (kvmppc_vcpu_woken(vcpu) || !vcpu->arch.ceded)
+			return RESUME_GUEST;
+
+		trace_kvmppc_vcore_blocked(vc, 0);
+		schedule();
+		trace_kvmppc_vcore_blocked(vc, 1);
+	}
+	finish_rcuwait(&vcpu->wait);
+
+	if (vcpu->arch.timer_running) {
+		hrtimer_try_to_cancel(&vcpu->arch.dec_timer);
+		vcpu->arch.timer_running = 0;
+	}
+
+	vcpu->arch.ceded = 0;
+	return RESUME_GUEST;
+}
+
 int kvmhv_run_single_vcpu(struct kvm_vcpu *vcpu, u64 time_limit,
 			  unsigned long lpcr)
 {
@@ -4488,11 +4517,6 @@ int kvmhv_run_single_vcpu(struct kvm_vcpu *vcpu, u64 time_limit,
 		goto out;
 	}
 
-	if (vcpu->arch.timer_running) {
-		hrtimer_try_to_cancel(&vcpu->arch.dec_timer);
-		vcpu->arch.timer_running = 0;
-	}
-
 	tb = mftb();
 
 	vcpu->cpu = pcpu;
@@ -4554,30 +4578,6 @@ int kvmhv_run_single_vcpu(struct kvm_vcpu *vcpu, u64 time_limit,
 			r = kvmppc_handle_nested_exit(vcpu);
 	}
 	vcpu->arch.ret = r;
-
-	if (is_kvmppc_resume_guest(r) && !kvmppc_vcpu_check_block(vcpu)) {
-		kvmppc_set_timer(vcpu);
-
-		prepare_to_rcuwait(&vcpu->wait);
-		for (;;) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			if (signal_pending(current)) {
-				vcpu->stat.signal_exits++;
-				run->exit_reason = KVM_EXIT_INTR;
-				vcpu->arch.ret = -EINTR;
-				break;
-			}
-
-			if (kvmppc_vcpu_check_block(vcpu))
-				break;
-
-			trace_kvmppc_vcore_blocked(vc, 0);
-			schedule();
-			trace_kvmppc_vcore_blocked(vc, 1);
-		}
-		finish_rcuwait(&vcpu->wait);
-	}
-	vcpu->arch.ceded = 0;
 
  done:
 	trace_kvmppc_run_vcpu_exit(vcpu);

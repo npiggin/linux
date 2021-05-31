@@ -179,37 +179,38 @@ void kvmppc_xive_pull_vcpu(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(kvmppc_xive_pull_vcpu);
 
-void kvmppc_xive_rearm_escalation(struct kvm_vcpu *vcpu)
+bool kvmppc_xive_rearm_escalation(struct kvm_vcpu *vcpu)
 {
 	void __iomem *esc_vaddr = (void __iomem *)vcpu->arch.xive_esc_vaddr;
 
 	if (!esc_vaddr)
-		return;
+		return false;
 
 	/* we are using XIVE with single escalation */
 
 	if (vcpu->arch.xive_esc_on) {
 		/*
-		 * If we still have a pending escalation, abort the cede,
-		 * and we must set PQ to 10 rather than 00 so that we don't
-		 * potentially end up with two entries for the escalation
-		 * interrupt in the XIVE interrupt queue.  In that case
-		 * we also don't want to set xive_esc_on to 1 here in
-		 * case we race with xive_esc_irq().
-		 */
-		vcpu->arch.ceded = 0;
-		/*
+		 * If we still have a pending escalation, return true to abort
+		 * the cede, and we must set PQ to 10 rather than 00 so that we
+		 * don't potentially end up with two entries for the escalation
+		 * interrupt in the XIVE interrupt queue.  In that case we also
+		 * don't want to set xive_esc_on to 1 here in case we race with
+		 * xive_esc_irq().
+		 *
 		 * The escalation interrupts are special as we don't EOI them.
 		 * There is no need to use the load-after-store ordering offset
 		 * to set PQ to 10 as we won't use StoreEOI.
 		 */
 		__raw_readq(esc_vaddr + XIVE_ESB_SET_PQ_10);
+		mb();
+		return true;
 	} else {
 		vcpu->arch.xive_esc_on = true;
 		mb();
 		__raw_readq(esc_vaddr + XIVE_ESB_SET_PQ_00);
+		mb();
+		return false;
 	}
-	mb();
 }
 EXPORT_SYMBOL_GPL(kvmppc_xive_rearm_escalation);
 
