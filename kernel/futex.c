@@ -237,7 +237,7 @@ struct futex_hash_bucket {
 	atomic_t waiters;
 	spinlock_t lock;
 	struct plist_head chain;
-} ____cacheline_aligned_in_smp;
+} __aligned(32); /* if this isn't power of two aligned then it can cross a cache line */
 
 /*
  * The base of the bucket array and its size are always used together
@@ -4049,7 +4049,7 @@ static int __init futex_init(void)
 #if CONFIG_BASE_SMALL
 	futex_hashsize = 16;
 #else
-	futex_hashsize = roundup_pow_of_two(256 * num_possible_cpus());
+	futex_hashsize = roundup_pow_of_two(4096 * num_possible_cpus());
 #endif
 
 	futex_queues = alloc_large_system_hash("futex", sizeof(*futex_queues),
