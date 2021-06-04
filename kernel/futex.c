@@ -2687,6 +2687,7 @@ static int futex_wait(u32 __user *uaddr, unsigned int flags, u32 val,
 	struct restart_block *restart;
 	struct futex_hash_bucket *hb;
 	struct futex_q q = futex_q_init;
+	u32 uval;
 	int ret;
 
 	if (!bitset)
@@ -2700,15 +2701,50 @@ retry:
 	 * Prepare to wait on uaddr. On success, holds hb lock and increments
 	 * q.key refs.
 	 */
-	ret = futex_wait_setup(uaddr, val, flags, &q, &hb);
-	if (ret)
+	ret = get_futex_key(uaddr, flags & FLAGS_SHARED, &q.key, FUTEX_READ);
+	if (unlikely(ret))
 		goto out;
 
+	set_current_state(TASK_INTERRUPTIBLE);
+
 	/* queue_me and wait for wakeup, timeout, or a signal. */
-	futex_wait_queue_me(hb, &q, to);
+	hb = queue_lock(&q);
+	queue_me(&q, hb);
+
+	if (unlikely(get_user(uval, uaddr))) {
+		ret = -EFAULT;
+out_unqueue:
+		__set_current_state(TASK_RUNNING);
+		if (!unqueue_me(&q))
+			ret = 0;
+		goto out;
+	}
+
+	if (val != uval) {
+		ret = -EAGAIN;
+		goto out_unqueue;
+	}
+
+	/* Arm the timer */
+	if (to)
+		hrtimer_sleeper_start_expires(to, HRTIMER_MODE_ABS);
+
+	/*
+	 * If we have been removed from the hash list, then another task
+	 * has tried to wake us, and we can skip the call to schedule().
+	 */
+	if (likely(!plist_node_empty(&q.list))) {
+		/*
+		 * If the timer has already expired, current will already be
+		 * flagged for rescheduling. Only call schedule if there
+		 * is no timeout, or if it has yet to expire.
+		 */
+		if (!to || to->task)
+			freezable_schedule();
+	}
+	__set_current_state(TASK_RUNNING);
 
 	/* If we were woken (and unqueued), we succeeded, whatever. */
-	ret = 0;
 	/* unqueue_me() drops q.key ref */
 	if (!unqueue_me(&q))
 		goto out;
