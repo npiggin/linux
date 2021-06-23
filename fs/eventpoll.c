@@ -1652,7 +1652,7 @@ static int ep_send_events(struct eventpoll *ep,
 	 */
 	list_for_each_entry_safe(epi, tmp, &txlist, rdllink) {
 		struct wakeup_source *ws;
-		__poll_t revents;
+		struct epoll_event e;
 
 		if (res >= maxevents)
 			break;
@@ -1680,12 +1680,12 @@ static int ep_send_events(struct eventpoll *ep,
 		 * deliver the event to userspace. Again, we are holding ep->mtx,
 		 * so no operations coming from userspace can change the item.
 		 */
-		revents = ep_item_poll(epi, &pt, 1);
-		if (!revents)
+		e.events = ep_item_poll(epi, &pt, 1);
+		if (!e.events)
 			continue;
+		e.data = epi->event.data;
 
-		if (__put_user(revents, &events->events) ||
-		    __put_user(epi->event.data, &events->data)) {
+		if (__copy_to_user(events, &e, sizeof(e))) {
 			list_add(&epi->rdllink, &txlist);
 			ep_pm_stay_awake(epi);
 			if (!res)
