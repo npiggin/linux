@@ -546,8 +546,10 @@ static void switch_mmu_to_guest_radix(struct kvm *kvm, struct kvm_vcpu *vcpu, u6
 {
 	struct kvm_nested_guest *nested = vcpu->arch.nested;
 	u32 lpid;
+	u32 pid;
 
 	lpid = nested ? nested->shadow_lpid : kvm->arch.lpid;
+	pid = vcpu->arch.pid;
 
 	/*
 	 * Prior memory accesses to host PID Q3 must be completed before we
@@ -558,7 +560,7 @@ static void switch_mmu_to_guest_radix(struct kvm *kvm, struct kvm_vcpu *vcpu, u6
 	isync();
 	mtspr(SPRN_LPID, lpid);
 	mtspr(SPRN_LPCR, lpcr);
-	mtspr(SPRN_PID, vcpu->arch.pid);
+	mtspr(SPRN_PID, pid);
 	/*
 	 * isync not required here because we are HRFID'ing to guest before
 	 * any guest context access, which is context synchronising.
