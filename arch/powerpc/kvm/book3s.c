@@ -403,18 +403,21 @@ static bool clear_irqprio(struct kvm_vcpu *vcpu, unsigned int priority)
 int kvmppc_core_prepare_to_enter(struct kvm_vcpu *vcpu)
 {
 	unsigned long *pending = &vcpu->arch.pending_exceptions;
-	unsigned long old_pending = vcpu->arch.pending_exceptions;
+	unsigned long old_pending = *pending;
 	unsigned int priority;
 
+	if (!old_pending)
+		return 0;
+
 #ifdef EXIT_DEBUG
-	if (vcpu->arch.pending_exceptions)
-		printk(KERN_EMERG "KVM: Check pending: %lx\n", vcpu->arch.pending_exceptions);
+	if (old_pending)
+		printk(KERN_EMERG "KVM: Check pending: %lx\n", old_pending);
 #endif
-	priority = __ffs(*pending);
+	priority = __ffs(old_pending);
 	while (priority < BOOK3S_IRQPRIO_MAX) {
 		if (kvmppc_book3s_irqprio_deliver(vcpu, priority) &&
 		    clear_irqprio(vcpu, priority)) {
-			clear_bit(priority, &vcpu->arch.pending_exceptions);
+			clear_bit(priority, pending);
 			break;
 		}
 

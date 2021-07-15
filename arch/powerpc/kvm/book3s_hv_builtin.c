@@ -736,7 +736,7 @@ void kvmppc_check_need_tlb_flush(struct kvm *kvm, int pcpu,
 	if (cpu_has_feature(CPU_FTR_ARCH_300))
 		pcpu = cpu_first_tlb_thread_sibling(pcpu);
 
-	if (nested)
+	if (unlikely(nested))
 		need_tlb_flush = &nested->need_tlb_flush;
 	else
 		need_tlb_flush = &kvm->arch.need_tlb_flush;
