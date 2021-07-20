@@ -6,11 +6,12 @@
 
 typedef __be32 rtas_arg_t;
 
+#define RTAS_ARGS_MAX	16
 struct rtas_args {
 	__be32 token;
 	__be32 nargs;
 	__be32 nret;
-	rtas_arg_t args[16];
+	rtas_arg_t args[RTAS_ARGS_MAX];
 	rtas_arg_t *rets;     /* Pointer to return values in args[]. */
 };
 
