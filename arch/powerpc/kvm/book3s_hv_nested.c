@@ -299,6 +299,9 @@ long kvmhv_enter_nested_guest(struct kvm_vcpu *vcpu)
 	u64 hdec_exp;
 	s64 delta_purr, delta_spurr, delta_ic, delta_vtb;
 
+	if (!IS_ENABLED(CONFIG_PPC_TRANSACTIONAL_MEM))
+		WARN_ON(vcpu->arch.hfscr & HFSCR_TM);
+
 	if (vcpu->kvm->arch.l1_ptcr == 0)
 		return H_NOT_AVAILABLE;
 
@@ -338,8 +341,10 @@ long kvmhv_enter_nested_guest(struct kvm_vcpu *vcpu)
 	} else {
 		if (l2_regs.msr & MSR_TS_MASK)
 			return H_BAD_MODE;
-		if (WARN_ON_ONCE(vcpu->arch.shregs.msr & MSR_TS_MASK))
+		if (WARN_ON_ONCE(vcpu->arch.shregs.msr & MSR_TS_MASK)) {
+			printk("MSR:0x%016lx\n", vcpu->arch.regs.msr);
 			return H_BAD_MODE;
+		}
 	}
 
 	/* translate lpid */
@@ -372,6 +377,14 @@ long kvmhv_enter_nested_guest(struct kvm_vcpu *vcpu)
 	sanitise_hv_regs(vcpu, &l2_hv);
 	restore_hv_regs(vcpu, &l2_hv);
 
+	if (!IS_ENABLED(CONFIG_PPC_TRANSACTIONAL_MEM)) {
+		WARN_ON(vcpu->arch.hfscr & HFSCR_TM);
+		if (vcpu->arch.regs.msr & MSR_TS_MASK) {
+			WARN_ON(1);
+			printk("MSR:0x%016lx\n", vcpu->arch.regs.msr);
+		}
+	}
+
 	vcpu->arch.ret = RESUME_GUEST;
 	vcpu->arch.trap = 0;
 	do {
@@ -401,6 +414,16 @@ long kvmhv_enter_nested_guest(struct kvm_vcpu *vcpu)
 		vcpu->arch.shregs.msr |= MSR_TS_S;
 	vc->tb_offset = saved_l1_hv.tb_offset;
 	restore_hv_regs(vcpu, &saved_l1_hv);
+
+	if (!IS_ENABLED(CONFIG_PPC_TRANSACTIONAL_MEM)) {
+		WARN_ON(l2_hv.hfscr & HFSCR_TM);
+		if (l2_regs.msr & MSR_TS_MASK) {
+			WARN_ON(1);
+			printk("MSR:0x%016lx\n", l2_regs.msr);
+		}
+		WARN_ON(vcpu->arch.hfscr & HFSCR_TM);
+	}
+
 	vcpu->arch.purr += delta_purr;
 	vcpu->arch.spurr += delta_spurr;
 	vcpu->arch.ic += delta_ic;
