@@ -606,6 +606,12 @@ int kvmhv_vcpu_entry_p9(struct kvm_vcpu *vcpu, u64 time_limit, unsigned long lpc
 	msr = msr_check_and_set(msr);
 	/* Save MSR for restore. This is after hard disable, so EE is clear. */
 
+	if (unlikely(load_vcpu_state(vcpu, &host_os_sprs))) {
+		/* TM restore can update current msr and vCPU MSR. */
+		msr = mfmsr();
+//		mtspr(SPRN_HSRR1, (vcpu->arch.shregs.msr & ~MSR_HV) | MSR_ME);
+	}
+
 	if (vc->tb_offset) {
 		u64 new_tb = *tb + vc->tb_offset;
 		mtspr(SPRN_TBU40, new_tb);
@@ -665,12 +671,6 @@ int kvmhv_vcpu_entry_p9(struct kvm_vcpu *vcpu, u64 time_limit, unsigned long lpc
 	mtspr(SPRN_SPRG3, vcpu->arch.shregs.sprg3);
 
 	local_paca->kvm_hstate.in_guest = KVM_GUEST_MODE_HV_P9;
-
-	if (unlikely(load_vcpu_state(vcpu, &host_os_sprs))) {
-		/* TM restore can update current msr and vCPU MSR. */
-		msr = mfmsr();
-		mtspr(SPRN_HSRR1, (vcpu->arch.shregs.msr & ~MSR_HV) | MSR_ME);
-	}
 
 	/*
 	 * Hash host, hash guest, or radix guest with prefetch bug, all have
