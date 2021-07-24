@@ -295,17 +295,25 @@ bool load_vcpu_state(struct kvm_vcpu *vcpu,
 {
 	bool ret = false;
 
+again:
 	if ((cpu_has_feature(CPU_FTR_TM) ||
 	    cpu_has_feature(CPU_FTR_P9_TM_HV_ASSIST)) &&
 		       (vcpu->arch.hfscr & HFSCR_TM)) {
 		unsigned long guest_msr = vcpu->arch.shregs.msr;
-		if (MSR_TM_ACTIVE(guest_msr)) {
+		if (MSR_TM_ACTIVE(guest_msr) || local_paca->kvm_hstate.fake_suspend) {
 			kvmppc_restore_tm_hv(vcpu, guest_msr, true);
 			ret = true;
 		} else {
 			mtspr(SPRN_TEXASR, vcpu->arch.texasr);
 			mtspr(SPRN_TFHAR, vcpu->arch.tfhar);
 			mtspr(SPRN_TFIAR, vcpu->arch.tfiar);
+		}
+	} else {
+		unsigned long guest_msr = vcpu->arch.shregs.msr;
+		if (MSR_TM_ACTIVE(guest_msr) || local_paca->kvm_hstate.fake_suspend) {
+			printk("load_vcpu TM active but no HFSCR[TM]!\n");
+			vcpu->arch.hfscr |= HFSCR_TM;
+			goto again;
 		}
 	}
 
@@ -331,11 +339,12 @@ void store_vcpu_state(struct kvm_vcpu *vcpu)
 #endif
 	vcpu->arch.vrsave = mfspr(SPRN_VRSAVE);
 
+again:
 	if ((cpu_has_feature(CPU_FTR_TM) ||
 	    cpu_has_feature(CPU_FTR_P9_TM_HV_ASSIST)) &&
 		       (vcpu->arch.hfscr & HFSCR_TM)) {
 		unsigned long guest_msr = vcpu->arch.shregs.msr;
-		if (MSR_TM_ACTIVE(guest_msr)) {
+		if (MSR_TM_ACTIVE(guest_msr) || local_paca->kvm_hstate.fake_suspend) {
 			kvmppc_save_tm_hv(vcpu, guest_msr, true);
 		} else {
 			vcpu->arch.texasr = mfspr(SPRN_TEXASR);
@@ -347,6 +356,13 @@ void store_vcpu_state(struct kvm_vcpu *vcpu)
 				if (!vcpu->arch.load_tm)
 					vcpu->arch.hfscr &= ~HFSCR_TM;
 			}
+		}
+	} else {
+		unsigned long guest_msr = vcpu->arch.shregs.msr;
+		if (MSR_TM_ACTIVE(guest_msr) || local_paca->kvm_hstate.fake_suspend) {
+			printk("store_vcpu TM active but no HFSCR[TM]!\n");
+			vcpu->arch.hfscr |= HFSCR_TM;
+			goto again;
 		}
 	}
 }
@@ -852,6 +868,12 @@ tm_return_to_guest:
 		 */
 		if (!local_paca->kvm_hstate.fake_suspend &&
 				(vcpu->arch.shregs.msr & MSR_TS_S)) {
+			if (!(vcpu->arch.hfscr & HFSCR_TM)) {
+				printk("softpatch but no HFSCR[TM]!\n");
+				vcpu->arch.hfscr |= HFSCR_TM;
+				mtspr(SPRN_HFSCR, vcpu->arch.hfscr);
+			}
+
 			if (kvmhv_p9_tm_emulation_early(vcpu)) {
 				/*
 				 * Go straight back into the guest with the
