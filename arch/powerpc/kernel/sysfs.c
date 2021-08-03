@@ -78,6 +78,28 @@ static int __init setup_smt_snooze_delay(char *str)
 }
 __setup("smt-snooze-delay=", setup_smt_snooze_delay);
 
+static ssize_t store_test_dec(struct device *dev,
+				      struct device_attribute *attr,
+				      const char *buf,
+				      size_t count)
+{
+	u64 value;
+	unsigned long i;
+
+	if (kstrtou64(buf, 0, &value))
+		return -EINVAL;
+
+	for (i = 0; i < value; i++) {
+		mtspr(SPRN_DEC, 0xFFFFFFFFFFFFFFFFULL);
+		while ((s64)mfspr(SPRN_DEC) < 0)
+			cpu_relax();
+	}
+
+	return count;
+}
+
+static DEVICE_ATTR(test_dec, 0200, NULL, store_test_dec);
+
 #endif /* CONFIG_PPC64 */
 
 #define __SYSFS_SPRSETUP_READ_WRITE(NAME, ADDRESS, EXTRA) \
@@ -836,6 +858,7 @@ static int register_cpu_online(unsigned int cpu)
 #ifdef CONFIG_PPC64
 	if (cpu_has_feature(CPU_FTR_SMT))
 		device_create_file(s, &dev_attr_smt_snooze_delay);
+	device_create_file(s, &dev_attr_test_dec);
 #endif
 
 	/* PMC stuff */
