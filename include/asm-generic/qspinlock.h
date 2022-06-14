@@ -82,6 +82,8 @@ static __always_inline int queued_spin_is_contended(struct qspinlock *lock)
 {
 	return atomic_read(&lock->val) & ~_Q_LOCKED_MASK;
 }
+
+#ifndef queued_spin_trylock
 /**
  * queued_spin_trylock - try to acquire the queued spinlock
  * @lock : Pointer to queued spinlock structure
@@ -93,6 +95,7 @@ static __always_inline int queued_spin_trylock(struct qspinlock *lock)
 
 	return likely(atomic_try_cmpxchg_acquire(&lock->val, &val, _Q_LOCKED_VAL));
 }
+#endif
 
 extern void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val);
 
