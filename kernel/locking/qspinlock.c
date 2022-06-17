@@ -69,22 +69,18 @@
 
 /*
  * On 64-bit architectures, the qnode structure will be 16 bytes in
- * size and four of them will fit nicely in one 64-byte cacheline. For
- * pvqspinlock, however, we need more space for extra data. To accommodate
- * that, we insert two more long words to pad it up to 32 bytes. IOW, only
- * two of them can fit in a cacheline in this case. That is OK as it is rare
- * to have more than 2 levels of slowpath nesting in actual use. We don't
- * want to penalize pvqspinlocks to optimize for a rare case in native
- * qspinlocks.
+ * size and four of them will fit nicely in one 64-byte cacheline. On
+ * 32-bit architectures, it will be 8 or 12 bytes depending on paravirt,
+ * also fitting into a cacheline.
  */
 struct qnode {
-	struct qnode *next;
-	int locked; /* 1 if lock acquired */
-	int count;  /* nesting count */
+	struct qnode	*next;
 #ifdef CONFIG_PARAVIRT_SPINLOCKS
-	int			cpu;
-	u8			state;
+	int		cpu;	/* qnode's CPU */
+	u8		state;	/* enum vcpu_state */
 #endif
+	u8		locked; /* 1 if lock acquired */
+	u8		count;  /* nesting count (only qnode[0].count used) */
 };
 
 /*
