@@ -82,7 +82,8 @@
 struct qnode {
 	struct mcs_spinlock mcs;
 #ifdef CONFIG_PARAVIRT_SPINLOCKS
-	long reserved[2];
+	int			cpu;
+	u8			state;
 #endif
 };
 

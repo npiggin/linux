@@ -47,12 +47,6 @@ enum vcpu_state {
 	vcpu_hashed,		/* = pv_hash'ed + vcpu_halted */
 };
 
-struct pv_node {
-	struct mcs_spinlock	mcs;
-	int			cpu;
-	u8			state;
-};
-
 /*
  * Hybrid PV queued/unfair lock
  *
@@ -170,7 +164,7 @@ static __always_inline int trylock_clear_pending(struct qspinlock *lock)
  */
 struct pv_hash_entry {
 	struct qspinlock *lock;
-	struct pv_node   *node;
+	struct qnode   *node;
 };
 
 #define PV_HE_PER_LINE	(SMP_CACHE_BYTES / sizeof(struct pv_hash_entry))
@@ -209,7 +203,7 @@ void __init __pv_init_lock_hash(void)
 	     offset < (1 << pv_lock_hash_bits);						\
 	     offset++, he = &pv_lock_hash[(hash + offset) & ((1 << pv_lock_hash_bits) - 1)])
 
-static struct qspinlock **pv_hash(struct qspinlock *lock, struct pv_node *node)
+static struct qspinlock **pv_hash(struct qspinlock *lock, struct qnode *node)
 {
 	unsigned long offset, hash = hash_ptr(lock, pv_lock_hash_bits);
 	struct pv_hash_entry *he;
@@ -236,11 +230,11 @@ static struct qspinlock **pv_hash(struct qspinlock *lock, struct pv_node *node)
 	BUG();
 }
 
-static struct pv_node *pv_unhash(struct qspinlock *lock)
+static struct qnode *pv_unhash(struct qspinlock *lock)
 {
 	unsigned long offset, hash = hash_ptr(lock, pv_lock_hash_bits);
 	struct pv_hash_entry *he;
-	struct pv_node *node;
+	struct qnode *node;
 
 	for_each_hash_entry(he, offset, hash) {
 		if (READ_ONCE(he->lock) == lock) {
@@ -264,7 +258,7 @@ static struct pv_node *pv_unhash(struct qspinlock *lock)
  * in a running state.
  */
 static inline bool
-pv_wait_early(struct pv_node *prev, int loop)
+pv_wait_early(struct qnode *prev, int loop)
 {
 	if ((loop & PV_PREV_CHECK_MASK) != 0)
 		return false;
@@ -277,9 +271,7 @@ pv_wait_early(struct pv_node *prev, int loop)
  */
 static void pv_init_node(struct mcs_spinlock *node)
 {
-	struct pv_node *pn = (struct pv_node *)node;
-
-	BUILD_BUG_ON(sizeof(struct pv_node) > sizeof(struct qnode));
+	struct qnode *pn = (struct qnode *)node;
 
 	pn->cpu = smp_processor_id();
 	pn->state = vcpu_running;
@@ -292,8 +284,8 @@ static void pv_init_node(struct mcs_spinlock *node)
  */
 static void pv_wait_node(struct mcs_spinlock *node, struct mcs_spinlock *prev)
 {
-	struct pv_node *pn = (struct pv_node *)node;
-	struct pv_node *pp = (struct pv_node *)prev;
+	struct qnode *pn = (struct qnode *)node;
+	struct qnode *pp = (struct qnode *)prev;
 	int loop;
 	bool wait_early;
 
@@ -359,7 +351,7 @@ static void pv_wait_node(struct mcs_spinlock *node, struct mcs_spinlock *prev)
  */
 static void pv_kick_node(struct qspinlock *lock, struct mcs_spinlock *node)
 {
-	struct pv_node *pn = (struct pv_node *)node;
+	struct qnode *pn = (struct qnode *)node;
 
 	/*
 	 * If the vCPU is indeed halted, advance its state to match that of
@@ -402,7 +394,7 @@ static void pv_kick_node(struct qspinlock *lock, struct mcs_spinlock *node)
 static u32
 pv_wait_head_or_lock(struct qspinlock *lock, struct mcs_spinlock *node)
 {
-	struct pv_node *pn = (struct pv_node *)node;
+	struct qnode *pn = (struct qnode *)node;
 	struct qspinlock **lp = NULL;
 	int waitcnt = 0;
 	int loop;
@@ -492,7 +484,7 @@ gotlock:
 __visible void
 __pv_queued_spin_unlock_slowpath(struct qspinlock *lock, u8 locked)
 {
-	struct pv_node *node;
+	struct qnode *node;
 
 	if (unlikely(locked != _Q_SLOW_VAL)) {
 		WARN(!debug_locks_silent,
@@ -517,14 +509,14 @@ __pv_queued_spin_unlock_slowpath(struct qspinlock *lock, u8 locked)
 	node = pv_unhash(lock);
 
 	/*
-	 * Now that we have a reference to the (likely) blocked pv_node,
+	 * Now that we have a reference to the (likely) blocked qnode,
 	 * release the lock.
 	 */
 	smp_store_release(&lock->locked, 0);
 
 	/*
 	 * At this point the memory pointed at by lock can be freed/reused,
-	 * however we can still use the pv_node to kick the CPU.
+	 * however we can still use the qnode to kick the CPU.
 	 * The other vCPU may not really be halted, but kicking an active
 	 * vCPU is harmless other than the additional latency in completing
 	 * the unlock.
