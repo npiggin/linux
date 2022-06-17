@@ -34,6 +34,10 @@ extern void __pv_queued_spin_lock_slowpath(struct qspinlock *lock, u32 val);
 extern void __raw_callee_save___pv_queued_spin_unlock(struct qspinlock *lock);
 extern bool nopvspin;
 
+#ifdef CONFIG_64BIT
+#define __pv_queued_spin_unlock	__pv_queued_spin_unlock
+#endif
+
 #define	queued_spin_unlock queued_spin_unlock
 /**
  * queued_spin_unlock - release a queued spinlock

@@ -745,16 +745,6 @@ __pv_queued_spin_unlock_slowpath(struct qspinlock *lock, u8 locked)
 	pv_kick(node->cpu);
 }
 
-/*
- * Include the architecture specific callee-save thunk of the
- * __pv_queued_spin_unlock(). This thunk is put together with
- * __pv_queued_spin_unlock() to make the callee-save thunk and the real unlock
- * function close to each other sharing consecutive instruction cachelines.
- * Alternatively, architecture specific version of __pv_queued_spin_unlock()
- * can be defined.
- */
-#include <asm/qspinlock_paravirt.h>
-
 #ifndef __pv_queued_spin_unlock
 __visible void __pv_queued_spin_unlock(struct qspinlock *lock)
 {
@@ -771,6 +761,7 @@ __visible void __pv_queued_spin_unlock(struct qspinlock *lock)
 
 	__pv_queued_spin_unlock_slowpath(lock, locked);
 }
+EXPORT_SYMBOL(__pv_queued_spin_unlock);
 #endif
 
 #else /* CONFIG_PARAVIRT_SPINLOCKS */
