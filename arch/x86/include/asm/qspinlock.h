@@ -29,7 +29,6 @@ static __always_inline u32 queued_fetch_set_pending_acquire(struct qspinlock *lo
 
 #ifdef CONFIG_PARAVIRT_SPINLOCKS
 extern void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val);
-extern void __pv_init_lock_hash(void);
 extern void __pv_queued_spin_lock_slowpath(struct qspinlock *lock, u32 val);
 extern void __raw_callee_save___pv_queued_spin_unlock(struct qspinlock *lock);
 extern bool nopvspin;

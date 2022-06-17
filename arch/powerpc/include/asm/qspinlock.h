@@ -53,13 +53,6 @@ static __always_inline void pv_kick(int cpu)
 	prod_cpu(cpu);
 }
 
-extern void __pv_init_lock_hash(void);
-
-static inline void pv_spinlocks_init(void)
-{
-	__pv_init_lock_hash();
-}
-
 #endif
 
 /*

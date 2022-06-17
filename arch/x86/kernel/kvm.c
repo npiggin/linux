@@ -1105,7 +1105,7 @@ void __init kvm_spinlock_init(void)
 
 	pr_info("PV spinlocks enabled\n");
 
-	__pv_init_lock_hash();
+	pv_spinlocks_init();
 	pv_ops.lock.queued_spin_lock_slowpath = __pv_queued_spin_lock_slowpath;
 	pv_ops.lock.queued_spin_unlock =
 		PV_CALLEE_SAVE(__pv_queued_spin_unlock);

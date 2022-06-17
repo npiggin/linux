@@ -147,4 +147,10 @@ static __always_inline bool virt_spin_lock(struct qspinlock *lock)
 #define arch_spin_trylock(l)		queued_spin_trylock(l)
 #define arch_spin_unlock(l)		queued_spin_unlock(l)
 
+#ifdef CONFIG_PARAVIRT_SPINLOCKS
+void pv_spinlocks_init(void);
+#else
+static inline void pv_spinlocks_init(void) { }
+#endif
+
 #endif /* __ASM_GENERIC_QSPINLOCK_H */

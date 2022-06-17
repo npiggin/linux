@@ -405,7 +405,7 @@ static unsigned int pv_lock_hash_bits __read_mostly;
  * This function should be called from the paravirt spinlock initialization
  * routine.
  */
-void __init __pv_init_lock_hash(void)
+void __init pv_spinlocks_init(void)
 {
 	int pv_hash_size = ALIGN(4 * num_possible_cpus(), PV_HE_PER_LINE);
 
