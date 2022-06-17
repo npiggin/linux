@@ -141,7 +141,26 @@ struct qnode *grab_qnode(struct qnode *base, int idx)
 
 #define _Q_LOCKED_PENDING_MASK (_Q_LOCKED_MASK | _Q_PENDING_MASK)
 
+/**
+ * set_pending - set the pending bit.
+ * @lock: Pointer to queued spinlock structure
+ *
+ * *,0,* -> *,1,*
+ *
+ * For paravirt, the pending bit is used by the queue head vCPU to indicate
+ * that it is actively spinning on the lock and no lock stealing is allowed.
+ * Non-paravirt, the pending bit is used to avoid loading the extra node
+ * cacheline in the likely contended case.
+ */
+static __always_inline void set_pending(struct qspinlock *lock)
+{
 #if _Q_PENDING_BITS == 8
+	WRITE_ONCE(lock->pending, 1);
+#else
+	atomic_or(_Q_PENDING_VAL, &lock->val);
+#endif
+}
+
 /**
  * clear_pending - clear the pending bit.
  * @lock: Pointer to queued spinlock structure
@@ -150,7 +169,11 @@ struct qnode *grab_qnode(struct qnode *base, int idx)
  */
 static __always_inline void clear_pending(struct qspinlock *lock)
 {
+#if _Q_PENDING_BITS == 8
 	WRITE_ONCE(lock->pending, 0);
+#else
+	atomic_andnot(_Q_PENDING_VAL, &lock->val);
+#endif
 }
 
 /**
@@ -163,7 +186,46 @@ static __always_inline void clear_pending(struct qspinlock *lock)
  */
 static __always_inline void clear_pending_set_locked(struct qspinlock *lock)
 {
+#if _Q_PENDING_BITS == 8
 	WRITE_ONCE(lock->locked_pending, _Q_LOCKED_VAL);
+#else
+	atomic_add(-_Q_PENDING_VAL + _Q_LOCKED_VAL, &lock->val);
+#endif
+}
+
+/**
+ * trylock_clear_pending - try to take ownership and clear the pending bit
+ * @lock: Pointer to queued spinlock structure
+ *
+ * 0,1,0 -> 0,0,1
+ */
+static __always_inline int trylock_clear_pending(struct qspinlock *lock)
+{
+#if _Q_PENDING_BITS == 8
+	return !READ_ONCE(lock->locked) &&
+	       (cmpxchg_acquire(&lock->locked_pending, _Q_PENDING_VAL,
+				_Q_LOCKED_VAL) == _Q_PENDING_VAL);
+#else
+	int val = atomic_read(&lock->val);
+
+	for (;;) {
+		int old, new;
+
+		if (val  & _Q_LOCKED_MASK)
+			break;
+
+		/*
+		 * Try to clear pending bit & set locked bit
+		 */
+		old = val;
+		new = (val & ~_Q_PENDING_MASK) | _Q_LOCKED_VAL;
+		val = atomic_cmpxchg_acquire(&lock->val, old, new);
+
+		if (val == old)
+			return 1;
+	}
+	return 0;
+#endif
 }
 
 /*
@@ -182,55 +244,14 @@ static __always_inline u32 xchg_tail(struct qspinlock *lock, u32 tail)
 	 * We can use relaxed semantics since the caller ensures that the
 	 * MCS node is properly initialized before updating the tail.
 	 */
+#if _Q_PENDING_BITS == 8
 	return (u32)xchg_relaxed(&lock->tail,
 				 tail >> _Q_TAIL_OFFSET) << _Q_TAIL_OFFSET;
-}
-
-#else /* _Q_PENDING_BITS == 8 */
-
-/**
- * clear_pending - clear the pending bit.
- * @lock: Pointer to queued spinlock structure
- *
- * *,1,* -> *,0,*
- */
-static __always_inline void clear_pending(struct qspinlock *lock)
-{
-	atomic_andnot(_Q_PENDING_VAL, &lock->val);
-}
-
-/**
- * clear_pending_set_locked - take ownership and clear the pending bit.
- * @lock: Pointer to queued spinlock structure
- *
- * *,1,0 -> *,0,1
- */
-static __always_inline void clear_pending_set_locked(struct qspinlock *lock)
-{
-	atomic_add(-_Q_PENDING_VAL + _Q_LOCKED_VAL, &lock->val);
-}
-
-/**
- * xchg_tail - Put in the new queue tail code word & retrieve previous one
- * @lock : Pointer to queued spinlock structure
- * @tail : The new queue tail code word
- * Return: The previous queue tail code word
- *
- * xchg(lock, tail)
- *
- * p,*,* -> n,*,* ; prev = xchg(lock, node)
- */
-static __always_inline u32 xchg_tail(struct qspinlock *lock, u32 tail)
-{
+#else
 	u32 old, new, val = atomic_read(&lock->val);
 
 	for (;;) {
 		new = (val & _Q_LOCKED_PENDING_MASK) | tail;
-		/*
-		 * We can use relaxed semantics since the caller ensures that
-		 * the MCS node is properly initialized before updating the
-		 * tail.
-		 */
 		old = atomic_cmpxchg_relaxed(&lock->val, val, new);
 		if (old == val)
 			break;
@@ -238,8 +259,8 @@ static __always_inline u32 xchg_tail(struct qspinlock *lock, u32 tail)
 		val = old;
 	}
 	return old;
+#endif
 }
-#endif /* _Q_PENDING_BITS == 8 */
 
 /**
  * queued_fetch_set_pending_acquire - fetch the whole lock value and set pending

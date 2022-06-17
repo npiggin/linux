@@ -96,57 +96,6 @@ static inline bool pv_hybrid_queued_unfair_trylock(struct qspinlock *lock)
 }
 
 /*
- * The pending bit is used by the queue head vCPU to indicate that it
- * is actively spinning on the lock and no lock stealing is allowed.
- */
-#if _Q_PENDING_BITS == 8
-static __always_inline void set_pending(struct qspinlock *lock)
-{
-	WRITE_ONCE(lock->pending, 1);
-}
-
-/*
- * The pending bit check in pv_queued_spin_steal_lock() isn't a memory
- * barrier. Therefore, an atomic cmpxchg_acquire() is used to acquire the
- * lock just to be sure that it will get it.
- */
-static __always_inline int trylock_clear_pending(struct qspinlock *lock)
-{
-	return !READ_ONCE(lock->locked) &&
-	       (cmpxchg_acquire(&lock->locked_pending, _Q_PENDING_VAL,
-				_Q_LOCKED_VAL) == _Q_PENDING_VAL);
-}
-#else /* _Q_PENDING_BITS == 8 */
-static __always_inline void set_pending(struct qspinlock *lock)
-{
-	atomic_or(_Q_PENDING_VAL, &lock->val);
-}
-
-static __always_inline int trylock_clear_pending(struct qspinlock *lock)
-{
-	int val = atomic_read(&lock->val);
-
-	for (;;) {
-		int old, new;
-
-		if (val  & _Q_LOCKED_MASK)
-			break;
-
-		/*
-		 * Try to clear pending bit & set locked bit
-		 */
-		old = val;
-		new = (val & ~_Q_PENDING_MASK) | _Q_LOCKED_VAL;
-		val = atomic_cmpxchg_acquire(&lock->val, old, new);
-
-		if (val == old)
-			return 1;
-	}
-	return 0;
-}
-#endif /* _Q_PENDING_BITS == 8 */
-
-/*
  * Lock and MCS node addresses hash table for fast lookup
  *
  * Hashing is done on a per-cacheline basis to minimize the need to access
