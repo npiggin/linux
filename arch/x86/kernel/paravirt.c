@@ -384,7 +384,7 @@ struct paravirt_patch_template pv_ops = {
 #if defined(CONFIG_PARAVIRT_SPINLOCKS)
 	/* Lock ops. */
 #ifdef CONFIG_SMP
-	.lock.queued_spin_lock_slowpath	= native_queued_spin_lock_slowpath,
+	.lock.queued_spin_lock_slowpath	= queued_spin_lock_slowpath,
 	.lock.queued_spin_unlock	=
 				PV_CALLEE_SAVE(__native_queued_spin_unlock),
 	.lock.wait			= paravirt_nop,

@@ -297,8 +297,7 @@ static __always_inline void set_locked(struct qspinlock *lock)
  *   pv_kick(cpu)             -- wakes a suspended vcpu
  *
  * Using these we implement __pv_queued_spin_lock_slowpath() and
- * __pv_queued_spin_unlock() to replace native_queued_spin_lock_slowpath() and
- * native_queued_spin_unlock().
+ * __pv_queued_spin_unlock().
  */
 
 #define _Q_SLOW_VAL	(3U << _Q_LOCKED_OFFSET)
@@ -988,10 +987,6 @@ release:
  * contended             :    (*,x,y) +--> (*,0,0) ---> (*,0,1) -'  :
  *   queue               :         ^--'                             :
  */
-#ifdef CONFIG_PARAVIRT_SPINLOCKS
-#define queued_spin_lock_slowpath	native_queued_spin_lock_slowpath
-#endif
-
 void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 {
 	if (virt_spin_lock(lock))
@@ -1072,7 +1067,6 @@ queue:
 EXPORT_SYMBOL(queued_spin_lock_slowpath);
 
 #ifdef CONFIG_PARAVIRT_SPINLOCKS
-#undef queued_spin_lock_slowpath
 void __pv_queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 {
 	queued_spin_lock_mcs_queue(lock, true);
