@@ -66,11 +66,10 @@
  *
  */
 
-#include "mcs_spinlock.h"
 #define MAX_NODES	4
 
 /*
- * On 64-bit architectures, the mcs_spinlock structure will be 16 bytes in
+ * On 64-bit architectures, the qnode structure will be 16 bytes in
  * size and four of them will fit nicely in one 64-byte cacheline. For
  * pvqspinlock, however, we need more space for extra data. To accommodate
  * that, we insert two more long words to pad it up to 32 bytes. IOW, only
@@ -80,7 +79,9 @@
  * qspinlocks.
  */
 struct qnode {
-	struct mcs_spinlock mcs;
+	struct qnode *next;
+	int locked; /* 1 if lock acquired */
+	int count;  /* nesting count */
 #ifdef CONFIG_PARAVIRT_SPINLOCKS
 	int			cpu;
 	u8			state;
@@ -124,18 +125,18 @@ static inline __pure u32 encode_tail(int cpu, int idx)
 	return tail;
 }
 
-static inline __pure struct mcs_spinlock *decode_tail(u32 tail)
+static inline __pure struct qnode *decode_tail(u32 tail)
 {
 	int cpu = (tail >> _Q_TAIL_CPU_OFFSET) - 1;
 	int idx = (tail &  _Q_TAIL_IDX_MASK) >> _Q_TAIL_IDX_OFFSET;
 
-	return per_cpu_ptr(&qnodes[idx].mcs, cpu);
+	return per_cpu_ptr(&qnodes[idx], cpu);
 }
 
 static inline __pure
-struct mcs_spinlock *grab_mcs_node(struct mcs_spinlock *base, int idx)
+struct qnode *grab_qnode(struct qnode *base, int idx)
 {
-	return &((struct qnode *)base + idx)->mcs;
+	return &base[idx];
 }
 
 #define _Q_LOCKED_PENDING_MASK (_Q_LOCKED_MASK | _Q_PENDING_MASK)
@@ -271,13 +272,13 @@ static __always_inline void set_locked(struct qspinlock *lock)
  * all the PV callbacks.
  */
 
-static __always_inline void __pv_init_node(struct mcs_spinlock *node) { }
-static __always_inline void __pv_wait_node(struct mcs_spinlock *node,
-					   struct mcs_spinlock *prev) { }
+static __always_inline void __pv_init_node(struct qnode *node) { }
+static __always_inline void __pv_wait_node(struct qnode *node,
+					   struct qnode *prev) { }
 static __always_inline void __pv_kick_node(struct qspinlock *lock,
-					   struct mcs_spinlock *node) { }
+					   struct qnode *node) { }
 static __always_inline u32  __pv_wait_head_or_lock(struct qspinlock *lock,
-						   struct mcs_spinlock *node)
+						   struct qnode *node)
 						   { return 0; }
 
 #define pv_enabled()		false
@@ -316,7 +317,7 @@ static __always_inline u32  __pv_wait_head_or_lock(struct qspinlock *lock,
  */
 void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 {
-	struct mcs_spinlock *prev, *next, *node;
+	struct qnode *prev, *next, *node;
 	u32 old, tail;
 	int idx;
 
@@ -399,7 +400,7 @@ void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 queue:
 	lockevent_inc(lock_slowpath);
 pv_queue:
-	node = this_cpu_ptr(&qnodes[0].mcs);
+	node = this_cpu_ptr(&qnodes[0]);
 	idx = node->count++;
 	tail = encode_tail(smp_processor_id(), idx);
 
@@ -421,7 +422,7 @@ pv_queue:
 		goto release;
 	}
 
-	node = grab_mcs_node(node, idx);
+	node = grab_qnode(node, idx);
 
 	/*
 	 * Keep counts of non-zero index values:
@@ -475,7 +476,8 @@ pv_queue:
 		WRITE_ONCE(prev->next, node);
 
 		pv_wait_node(node, prev);
-		arch_mcs_spin_lock_contended(&node->locked);
+		/* Wait for mcs node lock to be released */
+		smp_cond_load_acquire(&node->locked, VAL);
 
 		/*
 		 * While waiting for the MCS lock, the next pointer may have
@@ -554,7 +556,7 @@ locked:
 	if (!next)
 		next = smp_cond_load_relaxed(&node->next, (VAL));
 
-	arch_mcs_spin_unlock_contended(&next->locked);
+	smp_store_release(&next->locked, 1); /* unlock the mcs node lock */
 	pv_kick_node(lock, next);
 
 release:
@@ -563,7 +565,7 @@ release:
 	/*
 	 * release the node
 	 */
-	__this_cpu_dec(qnodes[0].mcs.count);
+	__this_cpu_dec(qnodes[0].count);
 }
 EXPORT_SYMBOL(queued_spin_lock_slowpath);
 

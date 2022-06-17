@@ -267,14 +267,12 @@ pv_wait_early(struct qnode *prev, int loop)
 }
 
 /*
- * Initialize the PV part of the mcs_spinlock node.
+ * Initialize the PV part of the qnode.
  */
-static void pv_init_node(struct mcs_spinlock *node)
+static void pv_init_node(struct qnode *node)
 {
-	struct qnode *pn = (struct qnode *)node;
-
-	pn->cpu = smp_processor_id();
-	pn->state = vcpu_running;
+	node->cpu = smp_processor_id();
+	node->state = vcpu_running;
 }
 
 /*
@@ -282,10 +280,8 @@ static void pv_init_node(struct mcs_spinlock *node)
  * pv_kick_node() is used to set _Q_SLOW_VAL and fill in hash table on its
  * behalf.
  */
-static void pv_wait_node(struct mcs_spinlock *node, struct mcs_spinlock *prev)
+static void pv_wait_node(struct qnode *node, struct qnode *prev)
 {
-	struct qnode *pn = (struct qnode *)node;
-	struct qnode *pp = (struct qnode *)prev;
 	int loop;
 	bool wait_early;
 
@@ -293,7 +289,7 @@ static void pv_wait_node(struct mcs_spinlock *node, struct mcs_spinlock *prev)
 		for (wait_early = false, loop = SPIN_THRESHOLD; loop; loop--) {
 			if (READ_ONCE(node->locked))
 				return;
-			if (pv_wait_early(pp, loop)) {
+			if (pv_wait_early(prev, loop)) {
 				wait_early = true;
 				break;
 			}
@@ -301,20 +297,20 @@ static void pv_wait_node(struct mcs_spinlock *node, struct mcs_spinlock *prev)
 		}
 
 		/*
-		 * Order pn->state vs pn->locked thusly:
+		 * Order node->state vs node->locked thusly:
 		 *
-		 * [S] pn->state = vcpu_halted	  [S] next->locked = 1
-		 *     MB			      MB
-		 * [L] pn->locked		[RmW] pn->state = vcpu_hashed
+		 * [S] node->state = vcpu_halted  [S] next->locked = 1
+		 *     MB                             MB
+		 * [L] node->locked             [RmW] node->state = vcpu_hashed
 		 *
 		 * Matches the cmpxchg() from pv_kick_node().
 		 */
-		smp_store_mb(pn->state, vcpu_halted);
+		smp_store_mb(node->state, vcpu_halted);
 
 		if (!READ_ONCE(node->locked)) {
 			lockevent_inc(pv_wait_node);
 			lockevent_cond_inc(pv_wait_early, wait_early);
-			pv_wait(&pn->state, vcpu_halted);
+			pv_wait(&node->state, vcpu_halted);
 		}
 
 		/*
@@ -322,7 +318,7 @@ static void pv_wait_node(struct mcs_spinlock *node, struct mcs_spinlock *prev)
 		 * value so that pv_wait_head_or_lock() knows to not also try
 		 * to hash this lock.
 		 */
-		cmpxchg(&pn->state, vcpu_halted, vcpu_running);
+		cmpxchg(&node->state, vcpu_halted, vcpu_running);
 
 		/*
 		 * If the locked flag is still not set after wakeup, it is a
@@ -349,10 +345,8 @@ static void pv_wait_node(struct mcs_spinlock *node, struct mcs_spinlock *prev)
  * such that they're waiting in pv_wait_head_or_lock(), this avoids a
  * wake/sleep cycle.
  */
-static void pv_kick_node(struct qspinlock *lock, struct mcs_spinlock *node)
+static void pv_kick_node(struct qspinlock *lock, struct qnode *node)
 {
-	struct qnode *pn = (struct qnode *)node;
-
 	/*
 	 * If the vCPU is indeed halted, advance its state to match that of
 	 * pv_wait_node(). If OTOH this fails, the vCPU was running and will
@@ -361,15 +355,15 @@ static void pv_kick_node(struct qspinlock *lock, struct mcs_spinlock *node)
 	 * Matches with smp_store_mb() and cmpxchg() in pv_wait_node()
 	 *
 	 * The write to next->locked in arch_mcs_spin_unlock_contended()
-	 * must be ordered before the read of pn->state in the cmpxchg()
+	 * must be ordered before the read of node->state in the cmpxchg()
 	 * below for the code to work correctly. To guarantee full ordering
 	 * irrespective of the success or failure of the cmpxchg(),
 	 * a relaxed version with explicit barrier is used. The control
-	 * dependency will order the reading of pn->state before any
+	 * dependency will order the reading of node->state before any
 	 * subsequent writes.
 	 */
 	smp_mb__before_atomic();
-	if (cmpxchg_relaxed(&pn->state, vcpu_halted, vcpu_hashed)
+	if (cmpxchg_relaxed(&node->state, vcpu_halted, vcpu_hashed)
 	    != vcpu_halted)
 		return;
 
@@ -381,7 +375,7 @@ static void pv_kick_node(struct qspinlock *lock, struct mcs_spinlock *node)
 	 * needed.
 	 */
 	WRITE_ONCE(lock->locked, _Q_SLOW_VAL);
-	(void)pv_hash(lock, pn);
+	(void)pv_hash(lock, node);
 }
 
 /*
@@ -392,9 +386,8 @@ static void pv_kick_node(struct qspinlock *lock, struct mcs_spinlock *node)
  * The current value of the lock will be returned for additional processing.
  */
 static u32
-pv_wait_head_or_lock(struct qspinlock *lock, struct mcs_spinlock *node)
+pv_wait_head_or_lock(struct qspinlock *lock, struct qnode *node)
 {
-	struct qnode *pn = (struct qnode *)node;
 	struct qspinlock **lp = NULL;
 	int waitcnt = 0;
 	int loop;
@@ -403,7 +396,7 @@ pv_wait_head_or_lock(struct qspinlock *lock, struct mcs_spinlock *node)
 	 * If pv_kick_node() already advanced our state, we don't need to
 	 * insert ourselves into the hash table anymore.
 	 */
-	if (READ_ONCE(pn->state) == vcpu_hashed)
+	if (READ_ONCE(node->state) == vcpu_hashed)
 		lp = (struct qspinlock **)1;
 
 	/*
@@ -416,7 +409,7 @@ pv_wait_head_or_lock(struct qspinlock *lock, struct mcs_spinlock *node)
 		 * Set correct vCPU state to be used by queue node wait-early
 		 * mechanism.
 		 */
-		WRITE_ONCE(pn->state, vcpu_running);
+		WRITE_ONCE(node->state, vcpu_running);
 
 		/*
 		 * Set the pending bit in the active lock spinning loop to
@@ -432,7 +425,7 @@ pv_wait_head_or_lock(struct qspinlock *lock, struct mcs_spinlock *node)
 
 
 		if (!lp) { /* ONCE */
-			lp = pv_hash(lock, pn);
+			lp = pv_hash(lock, node);
 
 			/*
 			 * We must hash before setting _Q_SLOW_VAL, such that
@@ -456,7 +449,7 @@ pv_wait_head_or_lock(struct qspinlock *lock, struct mcs_spinlock *node)
 				goto gotlock;
 			}
 		}
-		WRITE_ONCE(pn->state, vcpu_hashed);
+		WRITE_ONCE(node->state, vcpu_hashed);
 		lockevent_inc(pv_wait_head);
 		lockevent_cond_inc(pv_wait_again, waitcnt);
 		pv_wait(&lock->locked, _Q_SLOW_VAL);
