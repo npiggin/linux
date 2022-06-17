@@ -1,8 +1,4 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#ifndef _GEN_PV_LOCK_SLOWPATH
-#error "do not include this file"
-#endif
-
 #include <linux/hash.h>
 #include <linux/memblock.h>
 #include <linux/debug_locks.h>
@@ -50,9 +46,8 @@ enum vcpu_state {
 /*
  * Hybrid PV queued/unfair lock
  *
- * By replacing the regular queued_spin_trylock() with the function below,
- * it will be called once when a lock waiter enter the PV slowpath before
- * being queued.
+ * This function is called once when a lock waiter enters the PV slowpath
+ * before being queued.
  *
  * The pending bit is set by the queue head vCPU of the MCS wait queue in
  * pv_wait_head_or_lock() to signal that it is ready to spin on the lock.
@@ -71,7 +66,6 @@ enum vcpu_state {
  * queued lock (no lock starvation) and an unfair lock (good performance
  * on not heavily contended locks).
  */
-#define queued_spin_trylock(l)	pv_hybrid_queued_unfair_trylock(l)
 static inline bool pv_hybrid_queued_unfair_trylock(struct qspinlock *lock)
 {
 	/*

@@ -11,8 +11,6 @@
  *          Peter Zijlstra <peterz@infradead.org>
  */
 
-#ifndef _GEN_PV_LOCK_SLOWPATH
-
 #include <linux/smp.h>
 #include <linux/bug.h>
 #include <linux/cpumask.h>
@@ -287,35 +285,21 @@ static __always_inline void set_locked(struct qspinlock *lock)
 	WRITE_ONCE(lock->locked, _Q_LOCKED_VAL);
 }
 
-
-/*
- * Generate the native code for queued_spin_unlock_slowpath(); provide NOPs for
- * all the PV callbacks.
- */
-
-static __always_inline void __pv_init_node(struct qnode *node) { }
-static __always_inline void __pv_wait_node(struct qnode *node,
-					   struct qnode *prev) { }
-static __always_inline void __pv_kick_node(struct qspinlock *lock,
-					   struct qnode *node) { }
-static __always_inline u32  __pv_wait_head_or_lock(struct qspinlock *lock,
-						   struct qnode *node)
-						   { return 0; }
-
-#define pv_enabled()		false
-
-#define pv_init_node		__pv_init_node
-#define pv_wait_node		__pv_wait_node
-#define pv_kick_node		__pv_kick_node
-#define pv_wait_head_or_lock	__pv_wait_head_or_lock
-
 #ifdef CONFIG_PARAVIRT_SPINLOCKS
-#define queued_spin_lock_slowpath	native_queued_spin_lock_slowpath
-#endif
+#include "qspinlock_paravirt.h"
+#else /* CONFIG_PARAVIRT_SPINLOCKS */
+static __always_inline void pv_init_node(struct qnode *node) { }
+static __always_inline void pv_wait_node(struct qnode *node,
+					 struct qnode *prev) { }
+static __always_inline void pv_kick_node(struct qspinlock *lock,
+					 struct qnode *node) { }
+static __always_inline u32  pv_wait_head_or_lock(struct qspinlock *lock,
+						 struct qnode *node)
+						   { return 0; }
+static __always_inline bool pv_hybrid_queued_unfair_trylock(struct qspinlock *lock) { BUILD_BUG(); }
+#endif /* CONFIG_PARAVIRT_SPINLOCKS */
 
-#endif /* _GEN_PV_LOCK_SLOWPATH */
-
-static inline void queued_spin_lock_mcs_queue(struct qspinlock *lock)
+static __always_inline void queued_spin_lock_mcs_queue(struct qspinlock *lock, bool paravirt)
 {
 	struct qnode *prev, *next, *node;
 	u32 val, old, tail;
@@ -340,8 +324,13 @@ static inline void queued_spin_lock_mcs_queue(struct qspinlock *lock)
 	 */
 	if (unlikely(idx >= MAX_NODES)) {
 		lockevent_inc(lock_no_node);
-		while (!queued_spin_trylock(lock))
-			cpu_relax();
+		if (paravirt) {
+			while (!pv_hybrid_queued_unfair_trylock(lock))
+				cpu_relax();
+		} else {
+			while (!queued_spin_trylock(lock))
+				cpu_relax();
+		}
 		goto release;
 	}
 
@@ -361,15 +350,21 @@ static inline void queued_spin_lock_mcs_queue(struct qspinlock *lock)
 
 	node->locked = 0;
 	node->next = NULL;
-	pv_init_node(node);
+	if (paravirt)
+		pv_init_node(node);
 
 	/*
 	 * We touched a (possibly) cold cacheline in the per-cpu queue node;
 	 * attempt the trylock once more in the hope someone let go while we
 	 * weren't watching.
 	 */
-	if (queued_spin_trylock(lock))
-		goto release;
+	if (paravirt) {
+		if (pv_hybrid_queued_unfair_trylock(lock))
+			goto release;
+	} else {
+		if (queued_spin_trylock(lock))
+			goto release;
+	}
 
 	/*
 	 * Ensure that the initialisation of @node is complete before we
@@ -398,7 +393,8 @@ static inline void queued_spin_lock_mcs_queue(struct qspinlock *lock)
 		/* Link @node into the waitqueue. */
 		WRITE_ONCE(prev->next, node);
 
-		pv_wait_node(node, prev);
+		if (paravirt)
+			pv_wait_node(node, prev);
 		/* Wait for mcs node lock to be released */
 		smp_cond_load_acquire(&node->locked, VAL);
 
@@ -434,8 +430,10 @@ static inline void queued_spin_lock_mcs_queue(struct qspinlock *lock)
 	 * If PV isn't active, 0 will be returned instead.
 	 *
 	 */
-	if ((val = pv_wait_head_or_lock(lock, node)))
-		goto locked;
+	if (paravirt) {
+		if ((val = pv_wait_head_or_lock(lock, node)))
+			goto locked;
+	}
 
 	val = atomic_cond_read_acquire(&lock->val, !(VAL & _Q_LOCKED_PENDING_MASK));
 
@@ -480,7 +478,8 @@ locked:
 		next = smp_cond_load_relaxed(&node->next, (VAL));
 
 	smp_store_release(&next->locked, 1); /* unlock the mcs node lock */
-	pv_kick_node(lock, next);
+	if (paravirt)
+		pv_kick_node(lock, next);
 
 release:
 	trace_contention_end(lock, 0);
@@ -512,13 +511,12 @@ release:
  * contended             :    (*,x,y) +--> (*,0,0) ---> (*,0,1) -'  :
  *   queue               :         ^--'                             :
  */
+#ifdef CONFIG_PARAVIRT_SPINLOCKS
+#define queued_spin_lock_slowpath	native_queued_spin_lock_slowpath
+#endif
+
 void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 {
-	if (pv_enabled()) {
-		queued_spin_lock_mcs_queue(lock);
-		return;
-	}
-
 	if (virt_spin_lock(lock))
 		return;
 
@@ -592,31 +590,17 @@ void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 	 */
 queue:
 	lockevent_inc(lock_slowpath);
-	queued_spin_lock_mcs_queue(lock);
+	queued_spin_lock_mcs_queue(lock, false);
 }
 EXPORT_SYMBOL(queued_spin_lock_slowpath);
 
-/*
- * Generate the paravirt code for queued_spin_unlock_slowpath().
- */
-#if !defined(_GEN_PV_LOCK_SLOWPATH) && defined(CONFIG_PARAVIRT_SPINLOCKS)
-#define _GEN_PV_LOCK_SLOWPATH
-
-#undef  pv_enabled
-#define pv_enabled()	true
-
-#undef pv_init_node
-#undef pv_wait_node
-#undef pv_kick_node
-#undef pv_wait_head_or_lock
-
-#define queued_spin_lock_mcs_queue	__pv_queued_spin_lock_mcs_queue
-
-#undef  queued_spin_lock_slowpath
-#define queued_spin_lock_slowpath	__pv_queued_spin_lock_slowpath
-
-#include "qspinlock_paravirt.h"
-#include "qspinlock.c"
+#ifdef CONFIG_PARAVIRT_SPINLOCKS
+#undef queued_spin_lock_slowpath
+void __pv_queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
+{
+	queued_spin_lock_mcs_queue(lock, true);
+}
+EXPORT_SYMBOL(__pv_queued_spin_lock_slowpath);
 
 bool nopvspin __initdata;
 static __init int parse_nopvspin(char *arg)
@@ -625,4 +609,4 @@ static __init int parse_nopvspin(char *arg)
 	return 0;
 }
 early_param("nopvspin", parse_nopvspin);
-#endif
+#endif /* CONFIG_PARAVIRT_SPINLOCKS */
