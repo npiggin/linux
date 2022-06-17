@@ -608,8 +608,7 @@ static void pv_kick_node(struct qspinlock *lock, struct qnode *node)
  *
  * The current value of the lock will be returned for additional processing.
  */
-static u32
-pv_wait_head_or_lock(struct qspinlock *lock, struct qnode *node)
+static void pv_wait_head_or_lock(struct qspinlock *lock, struct qnode *node)
 {
 	struct qspinlock **lp = NULL;
 	int waitcnt = 0;
@@ -641,7 +640,7 @@ pv_wait_head_or_lock(struct qspinlock *lock, struct qnode *node)
 		set_pending(lock);
 		for (loop = SPIN_THRESHOLD; loop; loop--) {
 			if (trylock_clear_pending(lock))
-				goto gotlock;
+				return; /* got lock */
 			cpu_relax();
 		}
 		clear_pending(lock);
@@ -669,7 +668,7 @@ pv_wait_head_or_lock(struct qspinlock *lock, struct qnode *node)
 				 */
 				WRITE_ONCE(lock->locked, _Q_LOCKED_VAL);
 				WRITE_ONCE(*lp, NULL);
-				goto gotlock;
+				return; /* got lock */
 			}
 		}
 		WRITE_ONCE(node->state, vcpu_hashed);
@@ -685,12 +684,8 @@ pv_wait_head_or_lock(struct qspinlock *lock, struct qnode *node)
 
 	/*
 	 * The cmpxchg() or xchg() call before coming here provides the
-	 * acquire semantics for locking. The dummy ORing of _Q_LOCKED_VAL
-	 * here is to indicate to the compiler that the value will always
-	 * be nozero to enable better code optimization.
+	 * acquire semantics for locking.
 	 */
-gotlock:
-	return (u32)(atomic_read(&lock->val) | _Q_LOCKED_VAL);
 }
 
 /*
@@ -766,9 +761,8 @@ static __always_inline void pv_wait_node_acquire(struct qnode *node,
 						 struct qnode *prev) { }
 static __always_inline void pv_kick_node(struct qspinlock *lock,
 					 struct qnode *node) { }
-static __always_inline u32  pv_wait_head_or_lock(struct qspinlock *lock,
-						 struct qnode *node)
-						   { return 0; }
+static __always_inline void pv_wait_head_or_lock(struct qspinlock *lock,
+						 struct qnode *node) { }
 static __always_inline bool pv_hybrid_queued_unfair_trylock(struct qspinlock *lock) { BUILD_BUG(); }
 #endif /* CONFIG_PARAVIRT_SPINLOCKS */
 
@@ -889,24 +883,23 @@ static __always_inline void queued_spin_lock_mcs_queue(struct qspinlock *lock, b
 	 * sequentiality; this is because the set_locked() function below
 	 * does not imply a full barrier.
 	 *
-	 * The PV pv_wait_head_or_lock function, if active, will acquire
-	 * the lock and return a non-zero value. So we have to skip the
-	 * atomic_cond_read_acquire() call. As the next PV queue head hasn't
-	 * been designated yet, there is no way for the locked value to become
-	 * _Q_SLOW_VAL. So both the set_locked() and the
+	 * The PV pv_wait_head_or_lock function will acquire the lock, so
+	 * skip the atomic_cond_read_acquire() call. As the next PV queue head
+	 * hasn't been designated yet, there is no way for the locked value to
+	 * become _Q_SLOW_VAL. So both the set_locked() and the
 	 * atomic_cmpxchg_relaxed() calls will be safe.
 	 *
 	 * If PV isn't active, 0 will be returned instead.
 	 *
 	 */
 	if (paravirt) {
-		if ((val = pv_wait_head_or_lock(lock, node)))
-			goto locked;
+		pv_wait_head_or_lock(lock, node);
+		val = atomic_read(&lock->val);
+	} else {
+		val = atomic_cond_read_acquire(&lock->val,
+				!(VAL & _Q_LOCKED_PENDING_MASK));
 	}
 
-	val = atomic_cond_read_acquire(&lock->val, !(VAL & _Q_LOCKED_PENDING_MASK));
-
-locked:
 	/*
 	 * claim the lock:
 	 *
