@@ -800,13 +800,8 @@ static __always_inline void queued_spin_lock_mcs_queue(struct qspinlock *lock, b
 	 */
 	if (unlikely(idx >= MAX_NODES)) {
 		lockevent_inc(lock_no_node);
-		if (paravirt) {
-			while (!pv_hybrid_queued_unfair_trylock(lock))
-				cpu_relax();
-		} else {
-			while (!queued_spin_trylock(lock))
-				cpu_relax();
-		}
+		while (!queued_spin_trylock(lock))
+			cpu_relax();
 		goto release;
 	}
 
