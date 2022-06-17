@@ -294,112 +294,14 @@ static __always_inline u32  __pv_wait_head_or_lock(struct qspinlock *lock,
 
 #endif /* _GEN_PV_LOCK_SLOWPATH */
 
-/**
- * queued_spin_lock_slowpath - acquire the queued spinlock
- * @lock: Pointer to queued spinlock structure
- * @val: Current value of the queued spinlock 32-bit word
- *
- * (queue tail, pending bit, lock value)
- *
- *              fast     :    slow                                  :    unlock
- *                       :                                          :
- * uncontended  (0,0,0) -:--> (0,0,1) ------------------------------:--> (*,*,0)
- *                       :       | ^--------.------.             /  :
- *                       :       v           \      \            |  :
- * pending               :    (0,1,1) +--> (0,1,0)   \           |  :
- *                       :       | ^--'              |           |  :
- *                       :       v                   |           |  :
- * uncontended           :    (n,x,y) +--> (n,0,0) --'           |  :
- *   queue               :       | ^--'                          |  :
- *                       :       v                               |  :
- * contended             :    (*,x,y) +--> (*,0,0) ---> (*,0,1) -'  :
- *   queue               :         ^--'                             :
- */
-void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
+static inline void queued_spin_lock_mcs_queue(struct qspinlock *lock)
 {
 	struct qnode *prev, *next, *node;
-	u32 old, tail;
+	u32 val, old, tail;
 	int idx;
 
 	BUILD_BUG_ON(CONFIG_NR_CPUS >= (1U << _Q_TAIL_CPU_BITS));
 
-	if (pv_enabled())
-		goto pv_queue;
-
-	if (virt_spin_lock(lock))
-		return;
-
-	/*
-	 * Wait for in-progress pending->locked hand-overs with a bounded
-	 * number of spins so that we guarantee forward progress.
-	 *
-	 * 0,1,0 -> 0,0,1
-	 */
-	if (val == _Q_PENDING_VAL) {
-		int cnt = _Q_PENDING_LOOPS;
-		val = atomic_cond_read_relaxed(&lock->val,
-					       (VAL != _Q_PENDING_VAL) || !cnt--);
-	}
-
-	/*
-	 * If we observe any contention; queue.
-	 */
-	if (val & ~_Q_LOCKED_MASK)
-		goto queue;
-
-	/*
-	 * trylock || pending
-	 *
-	 * 0,0,* -> 0,1,* -> 0,0,1 pending, trylock
-	 */
-	val = queued_fetch_set_pending_acquire(lock);
-
-	/*
-	 * If we observe contention, there is a concurrent locker.
-	 *
-	 * Undo and queue; our setting of PENDING might have made the
-	 * n,0,0 -> 0,0,0 transition fail and it will now be waiting
-	 * on @next to become !NULL.
-	 */
-	if (unlikely(val & ~_Q_LOCKED_MASK)) {
-
-		/* Undo PENDING if we set it. */
-		if (!(val & _Q_PENDING_MASK))
-			clear_pending(lock);
-
-		goto queue;
-	}
-
-	/*
-	 * We're pending, wait for the owner to go away.
-	 *
-	 * 0,1,1 -> 0,1,0
-	 *
-	 * this wait loop must be a load-acquire such that we match the
-	 * store-release that clears the locked bit and create lock
-	 * sequentiality; this is because not all
-	 * clear_pending_set_locked() implementations imply full
-	 * barriers.
-	 */
-	if (val & _Q_LOCKED_MASK)
-		atomic_cond_read_acquire(&lock->val, !(VAL & _Q_LOCKED_MASK));
-
-	/*
-	 * take ownership and clear the pending bit.
-	 *
-	 * 0,1,0 -> 0,0,1
-	 */
-	clear_pending_set_locked(lock);
-	lockevent_inc(lock_pending);
-	return;
-
-	/*
-	 * End of pending bit optimistic spinning and beginning of MCS
-	 * queuing.
-	 */
-queue:
-	lockevent_inc(lock_slowpath);
-pv_queue:
 	node = this_cpu_ptr(&qnodes[0]);
 	idx = node->count++;
 	tail = encode_tail(smp_processor_id(), idx);
@@ -567,6 +469,110 @@ release:
 	 */
 	__this_cpu_dec(qnodes[0].count);
 }
+
+/**
+ * queued_spin_lock_slowpath - acquire the queued spinlock
+ * @lock: Pointer to queued spinlock structure
+ * @val: Current value of the queued spinlock 32-bit word
+ *
+ * (queue tail, pending bit, lock value)
+ *
+ *              fast     :    slow                                  :    unlock
+ *                       :                                          :
+ * uncontended  (0,0,0) -:--> (0,0,1) ------------------------------:--> (*,*,0)
+ *                       :       | ^--------.------.             /  :
+ *                       :       v           \      \            |  :
+ * pending               :    (0,1,1) +--> (0,1,0)   \           |  :
+ *                       :       | ^--'              |           |  :
+ *                       :       v                   |           |  :
+ * uncontended           :    (n,x,y) +--> (n,0,0) --'           |  :
+ *   queue               :       | ^--'                          |  :
+ *                       :       v                               |  :
+ * contended             :    (*,x,y) +--> (*,0,0) ---> (*,0,1) -'  :
+ *   queue               :         ^--'                             :
+ */
+void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
+{
+	if (pv_enabled()) {
+		queued_spin_lock_mcs_queue(lock);
+		return;
+	}
+
+	if (virt_spin_lock(lock))
+		return;
+
+	/*
+	 * Wait for in-progress pending->locked hand-overs with a bounded
+	 * number of spins so that we guarantee forward progress.
+	 *
+	 * 0,1,0 -> 0,0,1
+	 */
+	if (val == _Q_PENDING_VAL) {
+		int cnt = _Q_PENDING_LOOPS;
+		val = atomic_cond_read_relaxed(&lock->val,
+					       (VAL != _Q_PENDING_VAL) || !cnt--);
+	}
+
+	/*
+	 * If we observe any contention; queue.
+	 */
+	if (val & ~_Q_LOCKED_MASK)
+		goto queue;
+
+	/*
+	 * trylock || pending
+	 *
+	 * 0,0,* -> 0,1,* -> 0,0,1 pending, trylock
+	 */
+	val = queued_fetch_set_pending_acquire(lock);
+
+	/*
+	 * If we observe contention, there is a concurrent locker.
+	 *
+	 * Undo and queue; our setting of PENDING might have made the
+	 * n,0,0 -> 0,0,0 transition fail and it will now be waiting
+	 * on @next to become !NULL.
+	 */
+	if (unlikely(val & ~_Q_LOCKED_MASK)) {
+
+		/* Undo PENDING if we set it. */
+		if (!(val & _Q_PENDING_MASK))
+			clear_pending(lock);
+
+		goto queue;
+	}
+
+	/*
+	 * We're pending, wait for the owner to go away.
+	 *
+	 * 0,1,1 -> 0,1,0
+	 *
+	 * this wait loop must be a load-acquire such that we match the
+	 * store-release that clears the locked bit and create lock
+	 * sequentiality; this is because not all
+	 * clear_pending_set_locked() implementations imply full
+	 * barriers.
+	 */
+	if (val & _Q_LOCKED_MASK)
+		atomic_cond_read_acquire(&lock->val, !(VAL & _Q_LOCKED_MASK));
+
+	/*
+	 * take ownership and clear the pending bit.
+	 *
+	 * 0,1,0 -> 0,0,1
+	 */
+	clear_pending_set_locked(lock);
+	lockevent_inc(lock_pending);
+	return;
+
+	/*
+	 * End of pending bit optimistic spinning and beginning of MCS
+	 * queuing.
+	 */
+queue:
+	lockevent_inc(lock_slowpath);
+	queued_spin_lock_mcs_queue(lock);
+}
 EXPORT_SYMBOL(queued_spin_lock_slowpath);
 
 /*
@@ -582,6 +588,8 @@ EXPORT_SYMBOL(queued_spin_lock_slowpath);
 #undef pv_wait_node
 #undef pv_kick_node
 #undef pv_wait_head_or_lock
+
+#define queued_spin_lock_mcs_queue	__pv_queued_spin_lock_mcs_queue
 
 #undef  queued_spin_lock_slowpath
 #define queued_spin_lock_slowpath	__pv_queued_spin_lock_slowpath
