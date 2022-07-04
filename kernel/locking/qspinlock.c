@@ -506,15 +506,18 @@ static void pv_init_node(struct qnode *node)
  * pv_kick_node() is used to set _Q_SLOW_VAL and fill in hash table on its
  * behalf.
  */
-static void pv_wait_node(struct qnode *node, struct qnode *prev)
+static void pv_wait_node_acquire(struct qnode *node, struct qnode *prev)
 {
 	int loop;
 	bool wait_early;
 
 	for (;;) {
 		for (wait_early = false, loop = SPIN_THRESHOLD; loop; loop--) {
-			if (READ_ONCE(node->locked))
+			if (READ_ONCE(node->locked)) {
+				/* Provide the acquire ordering. */
+				smp_load_acquire(&node->locked);
 				return;
+			}
 			if (pv_wait_early(prev, loop)) {
 				wait_early = true;
 				break;
@@ -556,29 +559,23 @@ static void pv_wait_node(struct qnode *node, struct qnode *prev)
 		lockevent_cond_inc(pv_spurious_wakeup,
 				  !READ_ONCE(node->locked));
 	}
-
-	/*
-	 * By now our node->locked should be 1 and our caller will not actually
-	 * spin-wait for it. We do however rely on our caller to do a
-	 * load-acquire for us.
-	 */
 }
 
 /*
  * Called after setting next->locked = 1 when we're the lock owner.
  *
- * Instead of waking the waiters stuck in pv_wait_node() advance their state
- * such that they're waiting in pv_wait_head_or_lock(), this avoids a
+ * Instead of waking the waiters stuck in pv_wait_node_acquire() advance their
+ * state such that they're waiting in pv_wait_head_or_lock(), this avoids a
  * wake/sleep cycle.
  */
 static void pv_kick_node(struct qspinlock *lock, struct qnode *node)
 {
 	/*
 	 * If the vCPU is indeed halted, advance its state to match that of
-	 * pv_wait_node(). If OTOH this fails, the vCPU was running and will
-	 * observe its next->locked value and advance itself.
+	 * pv_wait_node_acquire(). If OTOH this fails, the vCPU was running and
+	 * will observe its next->locked value and advance itself.
 	 *
-	 * Matches with smp_store_mb() and cmpxchg() in pv_wait_node()
+	 * Matches with smp_store_mb() and cmpxchg() in pv_wait_node_acquire()
 	 *
 	 * The write to next->locked in arch_mcs_spin_unlock_contended()
 	 * must be ordered before the read of node->state in the cmpxchg()
@@ -765,8 +762,8 @@ EXPORT_SYMBOL(__pv_queued_spin_unlock);
 
 #else /* CONFIG_PARAVIRT_SPINLOCKS */
 static __always_inline void pv_init_node(struct qnode *node) { }
-static __always_inline void pv_wait_node(struct qnode *node,
-					 struct qnode *prev) { }
+static __always_inline void pv_wait_node_acquire(struct qnode *node,
+						 struct qnode *prev) { }
 static __always_inline void pv_kick_node(struct qspinlock *lock,
 					 struct qnode *node) { }
 static __always_inline u32  pv_wait_head_or_lock(struct qspinlock *lock,
@@ -864,10 +861,11 @@ static __always_inline void queued_spin_lock_mcs_queue(struct qspinlock *lock, b
 		/* Link @node into the waitqueue. */
 		WRITE_ONCE(prev->next, node);
 
-		if (paravirt)
-			pv_wait_node(node, prev);
 		/* Wait for mcs node lock to be released */
-		smp_cond_load_acquire(&node->locked, VAL);
+		if (paravirt)
+			pv_wait_node_acquire(node, prev);
+		else
+			smp_cond_load_acquire(&node->locked, VAL);
 
 		/*
 		 * While waiting for the MCS lock, the next pointer may have
