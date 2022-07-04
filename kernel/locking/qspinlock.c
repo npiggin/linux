@@ -359,7 +359,7 @@ static inline bool pv_hybrid_queued_unfair_trylock(struct qspinlock *lock)
 		int val = atomic_read(&lock->val);
 
 		if (!(val & _Q_LOCKED_PENDING_MASK) &&
-		   (cmpxchg_acquire(&lock->locked, 0, _Q_LOCKED_VAL) == 0)) {
+				queued_spin_trylock(lock)) {
 			lockevent_inc(pv_lock_stealing);
 			return true;
 		}
