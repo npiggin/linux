@@ -32,21 +32,33 @@ static inline int decode_tail_cpu(int val)
 	return (val >> _Q_TAIL_CPU_OFFSET) - 1;
 }
 
-/* Take the lock by setting the bit, no other CPUs may concurrently lock it. */
-static __always_inline void set_locked(struct qspinlock *lock)
+/*
+ * Try to acquire the lock if it was not already locked. If the tail matches
+ * mytail then clear it, otherwise leave it unchnaged. Return previous value.
+ *
+ * This is used by the head of the queue to acquire the lock and clean up
+ * its tail if it was the last one queued.
+ */
+static __always_inline int set_locked_clean_tail(struct qspinlock *lock, int tail)
 {
-	atomic_or(_Q_LOCKED_VAL, &lock->val);
-	__atomic_acquire_fence();
-}
-
-/* Take lock, clearing tail, cmpxchg with val (which must not be locked) */
-static __always_inline int trylock_clear_tail_cpu(struct qspinlock *lock, int val)
-{
-	int newval = _Q_LOCKED_VAL;
+	int val = atomic_read(&lock->val);
 
 	BUG_ON(val & _Q_LOCKED_VAL);
 
-	return atomic_cmpxchg_acquire(&lock->val, val, newval) == val;
+	/* If we're the last queued, must clean up the tail. */
+	if ((val & _Q_TAIL_CPU_MASK) == tail) {
+		if (atomic_cmpxchg_acquire(&lock->val, val, _Q_LOCKED_VAL) == val)
+			return val;
+		/* Another waiter must have enqueued */
+		val = atomic_read(&lock->val);
+		BUG_ON(val & _Q_LOCKED_VAL);
+	}
+
+	/* We must be the owner, just set the lock bit and acquire */
+	atomic_or(_Q_LOCKED_VAL, &lock->val);
+	__atomic_acquire_fence();
+
+	return val;
 }
 
 /*
@@ -152,14 +164,9 @@ static inline void queued_spin_lock_mcs_queue(struct qspinlock *lock)
 	}
 
 	/* If we're the last queued, must clean up the tail. */
-	if ((val & _Q_TAIL_CPU_MASK) == tail) {
-		if (trylock_clear_tail_cpu(lock, val))
-			goto release;
-		/* Another waiter must have enqueued */
-	}
-
-	/* We must be the owner, just set the lock bit and acquire */
-	set_locked(lock);
+	old = set_locked_clean_tail(lock, tail);
+	if ((old & _Q_TAIL_CPU_MASK) == tail)
+		goto release; /* Another waiter must have enqueued */
 
 	/* There is a next, must wait for node->next != NULL (MCS protocol) */
 	while (!(next = READ_ONCE(node->next)))
