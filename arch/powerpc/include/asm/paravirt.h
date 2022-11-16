@@ -3,14 +3,13 @@
 #define _ASM_POWERPC_PARAVIRT_H
 
 #include <linux/jump_label.h>
-#include <asm/smp.h>
 #ifdef CONFIG_PPC64
 #include <asm/paca.h>
 #include <asm/hvcall.h>
 #endif
 
 #ifdef CONFIG_PPC_SPLPAR
-#include <linux/smp.h>
+#include <asm/smp.h>
 #include <asm/kvm_guest.h>
 #include <asm/cputhreads.h>
 
