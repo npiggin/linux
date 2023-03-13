@@ -85,6 +85,9 @@ void guest_modes_append_default(void)
 			guest_mode_append(VM_MODE_P48V48_4K, true, true);
 	}
 #endif
+#ifdef __powerpc__
+	guest_mode_append(VM_MODE_P52V52_4K, true, true);
+#endif
 }
 
 void for_each_guest_mode(void (*func)(enum vm_guest_mode, void *), void *arg)
