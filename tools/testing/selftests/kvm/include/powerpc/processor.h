@@ -7,6 +7,7 @@
 
 #include <linux/compiler.h>
 #include "ppc_asm.h"
+#include "kvm_util_base.h"
 
 extern unsigned char __interrupts_start[];
 extern unsigned char __interrupts_end[];
@@ -30,4 +31,11 @@ struct ex_regs {
 
 void vm_install_exception_handler(struct kvm_vm *vm, int vector,
 			void (*handler)(struct ex_regs *));
+
+vm_paddr_t virt_pt_duplicate(struct kvm_vm *vm);
+void set_radix_proc_table(struct kvm_vm *vm, int pid, vm_paddr_t pgd);
+bool virt_wrprotect_pte(struct kvm_vm *vm, uint64_t gva);
+bool virt_wrenable_pte(struct kvm_vm *vm, uint64_t gva);
+bool virt_remap_pte(struct kvm_vm *vm, uint64_t gva, vm_paddr_t gpa);
+
 #endif

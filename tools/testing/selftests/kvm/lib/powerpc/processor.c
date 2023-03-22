@@ -22,7 +22,7 @@ static void set_proc_table(struct kvm_vm *vm, int pid, uint64_t dw0, uint64_t dw
 	proc_table[pid * 2 + 1] = cpu_to_be64(dw1);
 }
 
-static void set_radix_proc_table(struct kvm_vm *vm, int pid, vm_paddr_t pgd)
+void set_radix_proc_table(struct kvm_vm *vm, int pid, vm_paddr_t pgd)
 {
 	set_proc_table(vm, pid, pgd | RADIX_TREE_SIZE | RADIX_PGD_INDEX_SIZE, 0);
 }
@@ -145,9 +145,69 @@ static uint64_t *virt_get_pte(struct kvm_vm *vm, vm_paddr_t pt,
 #define PDE_NLS		0x0000000000000011ull
 #define PDE_PT_MASK	0x0fffffffffffff00ull
 
-void virt_arch_pg_map(struct kvm_vm *vm, uint64_t gva, uint64_t gpa)
+static uint64_t *virt_lookup_pte(struct kvm_vm *vm, uint64_t gva)
 {
 	vm_paddr_t pt = vm->pgd;
+	uint64_t *ptep;
+	int level;
+
+	for (level = 1; level <= 3; level++) {
+		uint64_t nls;
+		uint64_t *pdep = virt_get_pte(vm, pt, gva, level, &nls);
+		uint64_t pde = be64_to_cpu(*pdep);
+
+		if (pde) {
+			TEST_ASSERT((pde & PDE_VALID) && !(pde & PTE_LEAF),
+				"Invalid PDE at level: %u gva: 0x%lx pde:0x%lx\n",
+				level, gva, pde);
+			pt = pde & PDE_PT_MASK;
+			continue;
+		}
+
+		return NULL;
+	}
+
+	ptep = virt_get_pte(vm, pt, gva, level, NULL);
+
+	return ptep;
+}
+
+static bool virt_modify_pte(struct kvm_vm *vm, uint64_t gva, uint64_t clr, uint64_t set)
+{
+	uint64_t *ptep, pte;
+
+	ptep = virt_lookup_pte(vm, gva);
+	if (!ptep)
+		return false;
+
+	pte = be64_to_cpu(*ptep);
+	if (!(pte & PTE_VALID))
+		return false;
+
+	pte = (pte & ~clr) | set;
+	*ptep = cpu_to_be64(pte);
+
+	return true;
+}
+
+bool virt_remap_pte(struct kvm_vm *vm, uint64_t gva, vm_paddr_t gpa)
+{
+	return virt_modify_pte(vm, gva, PTE_PAGE_MASK, (gpa & PTE_PAGE_MASK));
+}
+
+bool virt_wrprotect_pte(struct kvm_vm *vm, uint64_t gva)
+{
+	return virt_modify_pte(vm, gva, PTE_RW, 0);
+}
+
+bool virt_wrenable_pte(struct kvm_vm *vm, uint64_t gva)
+{
+	return virt_modify_pte(vm, gva, 0, PTE_RW);
+}
+
+static void __virt_arch_pg_map(struct kvm_vm *vm, vm_paddr_t pgd, uint64_t gva, uint64_t gpa)
+{
+	vm_paddr_t pt = pgd;
 	uint64_t *ptep, pte;
 	int level;
 
@@ -184,6 +244,49 @@ void virt_arch_pg_map(struct kvm_vm *vm, uint64_t gva, uint64_t gpa)
 	pte = PTE_VALID | PTE_LEAF | PTE_REFERENCED | PTE_CHANGED |PTE_PRIV |
 	      PTE_READ | PTE_RW | PTE_EXEC | (gpa & PTE_PAGE_MASK);
 	*ptep = cpu_to_be64(pte);
+}
+
+void virt_arch_pg_map(struct kvm_vm *vm, uint64_t gva, uint64_t gpa)
+{
+	__virt_arch_pg_map(vm, vm->pgd, gva, gpa);
+}
+
+static void __virt_pt_duplicate(struct kvm_vm *vm, vm_paddr_t pgd, vm_paddr_t pt, vm_vaddr_t va, int level)
+{
+	uint64_t *page_table;
+	int size, idx;
+
+	page_table = addr_gpa2hva(vm, pt);
+	size = 1U << pt_shift(vm, level);
+	for (idx = 0; idx < size; idx++) {
+		uint64_t pte = be64_to_cpu(page_table[idx]);
+		if (pte & PTE_VALID) {
+			if (pte & PTE_LEAF) {
+				__virt_arch_pg_map(vm, pgd, va, pte & PTE_PAGE_MASK);
+			} else {
+				__virt_pt_duplicate(vm, pgd, pte & PDE_PT_MASK, va, level + 1);
+			}
+		}
+		va += pt_entry_coverage(vm, level);
+	}
+}
+
+vm_paddr_t virt_pt_duplicate(struct kvm_vm *vm)
+{
+	vm_paddr_t pgtb;
+	uint64_t *page_table;
+	size_t pgd_pages;
+
+	pgd_pages = 1UL << ((RADIX_PGD_INDEX_SIZE + 3) >> vm->page_shift);
+	TEST_ASSERT(pgd_pages == 1, "PGD allocation must be single page");
+	pgtb = vm_phy_page_alloc(vm, KVM_GUEST_PAGE_TABLE_MIN_PADDR,
+				 vm->memslots[MEM_REGION_PT]);
+	page_table = addr_gpa2hva(vm, pgtb);
+	memset(page_table, 0, vm->page_size * pgd_pages);
+
+	__virt_pt_duplicate(vm, pgtb, vm->pgd, 0, 1);
+
+	return pgtb;
 }
 
 vm_paddr_t addr_arch_gva2gpa(struct kvm_vm *vm, vm_vaddr_t gva)
@@ -243,7 +346,6 @@ static void virt_dump_pt(FILE *stream, struct kvm_vm *vm, vm_paddr_t pt,
 				     level + 1, indent + 2);
 		}
 	}
-
 }
 
 void virt_arch_dump(FILE *stream, struct kvm_vm *vm, uint8_t indent)
