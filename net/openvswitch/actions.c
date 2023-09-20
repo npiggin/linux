@@ -941,8 +941,9 @@ err:
 	ovs_kfree_skb_reason(skb, reason);
 }
 
-static void do_output(struct datapath *dp, struct sk_buff *skb, int out_port,
-		      struct sw_flow_key *key)
+static noinline_for_stack void do_output(struct datapath *dp,
+					 struct sk_buff *skb, int out_port,
+					 struct sw_flow_key *key)
 {
 	struct vport *vport = ovs_vport_rcu(dp, out_port);
 
@@ -972,10 +973,11 @@ static void do_output(struct datapath *dp, struct sk_buff *skb, int out_port,
 	}
 }
 
-static int output_userspace(struct datapath *dp, struct sk_buff *skb,
-			    struct sw_flow_key *key, const struct nlattr *attr,
-			    const struct nlattr *actions, int actions_len,
-			    uint32_t cutlen)
+static noinline_for_stack
+int output_userspace(struct datapath *dp, struct sk_buff *skb,
+		     struct sw_flow_key *key, const struct nlattr *attr,
+		     const struct nlattr *actions, int actions_len,
+		     uint32_t cutlen)
 {
 	struct dp_upcall_info upcall;
 	const struct nlattr *a;
@@ -1050,9 +1052,9 @@ static int dec_ttl_exception_handler(struct datapath *dp, struct sk_buff *skb,
  * Otherwise, sample() should keep 'skb' intact regardless what
  * actions are executed within sample().
  */
-static int sample(struct datapath *dp, struct sk_buff *skb,
-		  struct sw_flow_key *key, const struct nlattr *attr,
-		  bool last)
+static noinline_for_stack int sample(struct datapath *dp, struct sk_buff *skb,
+				     struct sw_flow_key *key,
+				     const struct nlattr *attr, bool last)
 {
 	struct nlattr *actions;
 	struct nlattr *sample_arg;
@@ -1081,9 +1083,10 @@ static int sample(struct datapath *dp, struct sk_buff *skb,
  * Otherwise, clone() should keep 'skb' intact regardless what
  * actions are executed within clone().
  */
-static int clone(struct datapath *dp, struct sk_buff *skb,
-		 struct sw_flow_key *key, const struct nlattr *attr,
-		 bool last)
+static noinline_for_stack int clone(struct datapath *dp,
+				    struct sk_buff *skb,
+				    struct sw_flow_key *key,
+				    const struct nlattr *attr, bool last)
 {
 	struct nlattr *actions;
 	struct nlattr *clone_arg;
@@ -1099,8 +1102,9 @@ static int clone(struct datapath *dp, struct sk_buff *skb,
 			     !dont_clone_flow_key);
 }
 
-static void execute_hash(struct sk_buff *skb, struct sw_flow_key *key,
-			 const struct nlattr *attr)
+static noinline_for_stack void execute_hash(struct sk_buff *skb,
+					    struct sw_flow_key *key,
+					    const struct nlattr *attr)
 {
 	struct ovs_action_hash *hash_act = nla_data(attr);
 	u32 hash = 0;
@@ -1122,9 +1126,9 @@ static void execute_hash(struct sk_buff *skb, struct sw_flow_key *key,
 	key->ovs_flow_hash = hash;
 }
 
-static int execute_set_action(struct sk_buff *skb,
-			      struct sw_flow_key *flow_key,
-			      const struct nlattr *a)
+static noinline_for_stack int execute_set_action(struct sk_buff *skb,
+						 struct sw_flow_key *flow_key,
+						 const struct nlattr *a)
 {
 	/* Only tunnel set execution is supported without a mask. */
 	if (nla_type(a) == OVS_KEY_ATTR_TUNNEL_INFO) {
@@ -1142,9 +1146,9 @@ static int execute_set_action(struct sk_buff *skb,
 /* Mask is at the midpoint of the data. */
 #define get_mask(a, type) ((const type)nla_data(a) + 1)
 
-static int execute_masked_set_action(struct sk_buff *skb,
-				     struct sw_flow_key *flow_key,
-				     const struct nlattr *a)
+static noinline_for_stack
+int execute_masked_set_action(struct sk_buff *skb, struct sw_flow_key *flow_key,
+			      const struct nlattr *a)
 {
 	int err = 0;
 
@@ -1217,9 +1221,9 @@ static int execute_masked_set_action(struct sk_buff *skb,
 	return err;
 }
 
-static int execute_recirc(struct datapath *dp, struct sk_buff *skb,
-			  struct sw_flow_key *key,
-			  const struct nlattr *a, bool last)
+static noinline_for_stack
+int execute_recirc(struct datapath *dp, struct sk_buff *skb,
+		   struct sw_flow_key *key, const struct nlattr *a, bool last)
 {
 	u32 recirc_id;
 
@@ -1236,9 +1240,10 @@ static int execute_recirc(struct datapath *dp, struct sk_buff *skb,
 	return clone_execute(dp, skb, key, recirc_id, NULL, 0, last, true);
 }
 
-static int execute_check_pkt_len(struct datapath *dp, struct sk_buff *skb,
-				 struct sw_flow_key *key,
-				 const struct nlattr *attr, bool last)
+static noinline_for_stack
+int execute_check_pkt_len(struct datapath *dp, struct sk_buff *skb,
+			  struct sw_flow_key *key, const struct nlattr *attr,
+			  bool last)
 {
 	struct ovs_skb_cb *ovs_cb = OVS_CB(skb);
 	const struct nlattr *actions, *cpl_arg;
@@ -1275,7 +1280,8 @@ static int execute_check_pkt_len(struct datapath *dp, struct sk_buff *skb,
 			     nla_len(actions), last, clone_flow_key);
 }
 
-static int execute_dec_ttl(struct sk_buff *skb, struct sw_flow_key *key)
+static noinline_for_stack int execute_dec_ttl(struct sk_buff *skb,
+					      struct sw_flow_key *key)
 {
 	int err;
 
@@ -1554,10 +1560,11 @@ static int do_execute_actions(struct datapath *dp, struct sk_buff *skb,
  * The execution may be deferred in case the actions can not be executed
  * immediately.
  */
-static int clone_execute(struct datapath *dp, struct sk_buff *skb,
-			 struct sw_flow_key *key, u32 recirc_id,
-			 const struct nlattr *actions, int len,
-			 bool last, bool clone_flow_key)
+static noinline_for_stack
+int clone_execute(struct datapath *dp, struct sk_buff *skb,
+		  struct sw_flow_key *key, u32 recirc_id,
+		  const struct nlattr *actions, int len, bool last,
+		  bool clone_flow_key)
 {
 	struct deferred_action *da;
 	struct sw_flow_key *clone;
