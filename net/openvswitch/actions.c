@@ -81,7 +81,7 @@ static DEFINE_PER_CPU(int, flow_keys_allocated);
 
 static struct action_fifo __percpu *action_fifos;
 
-static struct sw_flow_key *ovs_flow_key_alloc(void)
+struct sw_flow_key *ovs_flow_key_alloc(void)
 {
 	struct flow_key_stack *keys = this_cpu_ptr(flow_key_stack);
 	int level = this_cpu_read(flow_keys_allocated);
@@ -94,7 +94,7 @@ static struct sw_flow_key *ovs_flow_key_alloc(void)
 	return &keys->key[level];
 }
 
-static void ovs_flow_key_free(struct sw_flow_key *key)
+void ovs_flow_key_free(struct sw_flow_key *key)
 {
 	__this_cpu_dec(flow_keys_allocated);
 
